@@ -19,7 +19,6 @@ export type View = {
   loops: Readonly<Record<string, LoopLive>>
   isCollapsed: boolean
   settings: Settings
-  planName?: string
 }
 
 type Row = { guides: string; glyph: string; name: string; live: LoopLive; activity: string; isMain?: boolean; isIdle?: boolean }
@@ -38,8 +37,8 @@ const total = (parts: [Family, number][]): number => parts.reduce((sum, [, n]) =
 const shares = (t: FamilyTokens): [Family, number][] => FAMILIES.flatMap(f => (t[f] ? [[f, t[f]] as [Family, number]] : []))
 const byFamily = (parts: [Family, number][]): [string, number][] => parts.map(([f, n]) => [FAMILY_COLOUR[f], n])
 const waiting = (n: number): string | undefined => (n ? `waiting on ${n} agent${n === 1 ? '' : 's'}` : undefined)
-const planTitle = (v: View): string => v.planName ?? 'Plan Limits'
-const label = (text: string, v: View): Seg => seg(pad(text, Math.max(9, planTitle(v).length + 2)), HEADING)
+const PLAN = 'Plan Limits'
+const label = (text: string): Seg => seg(pad(text, PLAN.length + 2), HEADING)
 /** Wide enough for every row's key, a long window name and its reset time included. */
 const keyWidth = (v: View, narrow: boolean): number => Math.max(narrow ? 16 : 20, ...v.limits.map(w => windowLabel(w.kind).length + 10))
 const planHealth = (w: LimitWindow, v: View): Health => healthOf(w.percentUsed, 100, v.settings.warn, v.settings.danger)
@@ -73,7 +72,7 @@ type Cells = { key: Line; model?: Seg; bar?: Line; value?: Seg; detail: Line | (
 /** One row of the grid: label, key, model, bar and value columns, then as much detail as fits. */
 function row(heading: string, c: Cells, v: View, narrow: boolean): Line {
   const line = [
-    label(heading, v),
+    label(heading),
     ...column(c.key, keyWidth(v, narrow)),
     ...column(c.model ? [c.model] : [], narrow ? 8 : 12),
     ...(narrow ? [] : column(c.bar ?? [], BAR + 2)),
@@ -98,12 +97,7 @@ export function contextOf(live: LoopLive, main: MainContext & LoopLive, settings
 }
 
 function planLines(v: View, narrow: boolean): Line[] {
-  const name = planTitle(v)
-  if (!v.limits.length) {
-    const note = !shares(v.sessionTokens).length ? 'appears after the first reply' : v.planName && 'no usage limits reported'
-
-    return note ? [[label(name, v), seg(note, DIM)]] : []
-  }
+  if (!v.limits.length) return shares(v.sessionTokens).length ? [] : [[label(PLAN), seg('appears after the first reply', DIM)]]
 
   const kindWidth = Math.max(...v.limits.map(w => windowLabel(w.kind).length)) + 2
 
@@ -118,7 +112,7 @@ function planLines(v: View, narrow: boolean): Line[] {
       detail: w.percentUsed >= 100 ? [seg('limited', { color: HEALTH_COLOUR.bad, bold: true })] : room => legend(parts, room, '≈ '),
     }
 
-    return row(i ? '' : name, cells, v, narrow)
+    return row(i ? '' : PLAN, cells, v, narrow)
   })
 }
 
@@ -169,7 +163,7 @@ function agentLines(v: View, narrow: boolean): Line[] {
 function collapsedLine(v: View): Line {
   const line: Line = []
   if (v.settings.showPlan && v.limits.length) {
-    line.push(seg(`${planTitle(v)} `, HEADING))
+    line.push(seg(`${PLAN} `, HEADING))
     v.limits.forEach((w, i) => line.push(seg(`${i ? ' · ' : ''}${windowLabel(w.kind)} `), healthSeg(percent(w.percentUsed), planHealth(w, v))))
     line.push(seg('   '))
   }

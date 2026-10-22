@@ -6,7 +6,7 @@ import { type UsageLog, addTo, hourOf, merge, splitFor, weigh } from './estimate
 import { describeTool } from './format'
 import { type Line, buildLines } from './layout'
 import { familyOf } from './palette'
-import { overrideFrom, planNameFrom, settingsFrom } from './settings'
+import { overrideFrom, settingsFrom } from './settings'
 import { isLive } from './tree'
 
 const MAIN = 'main'
@@ -22,7 +22,6 @@ const planSplit = atom({ plugin: 'context-canopy', key: 'planSplit' } as const, 
 const roster = atom({ plugin: 'context-canopy', key: 'roster' } as const, [] as AgentRow[])
 const loops = atom({ plugin: 'context-canopy', key: 'loops' } as const, {} as Record<string, LoopLive>)
 const isCollapsed = atom({ plugin: 'context-canopy', key: 'isCollapsed' } as const, false)
-const planName = atom({ plugin: 'context-canopy', key: 'planName' } as const, null as string | null)
 const overrides = atom({ plugin: 'context-canopy', key: 'overrides' } as const, {} as Overrides)
 
 let log: UsageLog = {}
@@ -107,11 +106,10 @@ async function snapshot($: EngineInterface, width: number, collapsed?: boolean):
     loops: allLoops,
     isCollapsed: collapsed ?? (await read($, isCollapsed)),
     settings: settingsFrom(await read($, overrides)),
-    planName: (await read($, planName)) ?? undefined,
   })
 }
 
-async function status($: EngineInterface): Promise<string> {
+async function statusReport($: EngineInterface): Promise<string> {
   const surfaces = await $.session.surfaces()
   const drawn = Object.entries(asks).map(([surface, a]) => `${surface}: asked ${a.count}×, ${a.columns} cols, ${a.lines} lines`)
 
@@ -138,9 +136,6 @@ export const register: Register = on => {
     log = ((await $.store.get(LOG_KEY)) ?? {}) as UsageLog
     const saved = ((await $.store.get(SETTINGS_KEY)) ?? {}) as Overrides
     await update($, overrides, () => saved)
-    // Claude Code shares the organisation's plan only with organisation-managed installs.
-    const identity = await $.session.identity().catch(() => undefined)
-    await update($, planName, () => planNameFrom(identity?.organizationType) ?? null)
     await $.command.register({
       name: 'canopy',
       description: 'Collapse, expand or adjust the Context Canopy band',
@@ -204,7 +199,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'canopy' }, async ($, e) => {
     const [arg = '', size, value] = e.args.trim().toLowerCase().split(/\s+/)
-    if (arg === 'status') return { text: await status($) }
+    if (arg === 'status') return { text: await statusReport($) }
     if (arg === 'reset') return { text: await setOverrides($, () => ({})) }
     if (arg === 'set') {
       const change = overrideFrom(size, value)

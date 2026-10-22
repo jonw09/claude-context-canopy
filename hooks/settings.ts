@@ -32,11 +32,3 @@ export function overrideFrom(key = '', value = ''): Overrides | undefined {
 
   return undefined
 }
-
-/** The organisation's plan (`claude_enterprise` → `Enterprise`), where Claude Code shares it. */
-export const planNameFrom = (organizationType = ''): string | undefined =>
-  organizationType
-    .replace(/^claude_/, '')
-    .split('_')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ') || undefined

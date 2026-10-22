@@ -82,9 +82,8 @@ const SCREENS = [
   { file: 'band.png', title: 'Three agents at work, one nested', v: view(TEAM) },
   {
     file: 'enterprise.png',
-    title: 'An Enterprise seat with a spend limit',
+    title: 'An organisation seat with a spend limit',
     v: view({
-      planName: 'Enterprise',
       limits: [{ kind: 'spend_limit', percentUsed: 64, resetsAt: at(13_000) }],
       planSplit: { spend_limit: { opus: 70, sonnet: 30 } },
       sessionTokens: { opus: 210_000, sonnet: 80_000 },
