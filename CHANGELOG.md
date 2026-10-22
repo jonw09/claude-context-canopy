@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/jonw09/claude-context-canopy/compare/v0.1.1...v0.1.2) (2026-10-22)
+
+
+### Documentation
+
+* bring the icon back to the top of the README ([#12](https://github.com/jonw09/claude-context-canopy/issues/12)) ([af68a31](https://github.com/jonw09/claude-context-canopy/commit/af68a31f35bc3d576cace2780ddc0d74b30a0af2))
+
 ## [0.1.1](https://github.com/jonw09/claude-context-canopy/compare/v0.1.0...v0.1.1) (2026-10-22)
 
 
