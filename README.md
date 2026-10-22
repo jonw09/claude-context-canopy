@@ -153,10 +153,10 @@ If the band doesn't appear, run `/canopy status`. It lists which apps are attach
 
 Context Canopy only reads, and nothing leaves your machine. It makes no network requests, calls no model and sends nothing anywhere.
 
-- **What it reads:** this session's token counts, cost and rate-limit windows, the list of running agents, and the apps attached to the session (for `/canopy status`). As Claude works, it reads each agent's model and token counts and the tool each one calls, with that tool's main argument (a file path, search pattern or shell command), to show what each agent is doing.
-- **What it stores:** an hourly count of tokens per model, for the `≈` estimate, and your `/canopy set` choices. Both stay in Claude Code's local plugin store on this machine.
+- **What it reads:** this session's token counts, cost and rate-limit windows, the list of running agents, and the apps attached to the session (for `/canopy status`). As Claude works, it reads each agent's model and token counts and the tool each one calls, with that tool's main argument (a file path, search pattern or shell command), to show what each agent is doing. That activity is held in memory for the session only and is never saved.
+- **What it stores:** an hourly count of tokens per model family (numbers only, no prompts, file names or content), for the `≈` estimate, and your `/canopy set` choices. Both stay in Claude Code's local plugin store on this machine. Hourly counts older than eight days are deleted.
 - **What its hooks change:** nothing. Every event it hooks is passed on unchanged. It reads `agent.spawn` only for the new agent's id and model, and `tool.call` only for the activity shown in the tree. It never blocks a tool, rewrites a prompt or changes settings.
-- **What it adds:** the `/canopy` command, which it answers itself. It adds no tools and no agents, and it handles no other command.
+- **What it adds:** the `/canopy` command, which it answers itself. It adds no tools and no agents, and it handles no other command. `/canopy show` prints the band as text into your conversation, activity included, so it becomes part of the session like any other command output. Nothing else the plugin draws enters the conversation.
 
 ## Update or remove
 
