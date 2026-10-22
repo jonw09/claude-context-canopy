@@ -67,9 +67,12 @@ Checked against the Claude Code 2.1.306 plugin API.
 
 ## Testing
 
+From a clone of the repository:
+
 ```
-claude plugin validate .
-claude plugin test .
+claude --plugin-dir .             # run it from this folder
+claude plugin validate --strict . # check the manifest and hooks module
+claude plugin test .              # run the tests
 ```
 
 - `tests/helpers.test.ts`: tree, format, palette, estimate and settings.
@@ -123,4 +126,6 @@ END_COMMIT_OVERRIDE
 
 ### Plugin directory
 
-To list it in Anthropic's plugin directory, run `claude plugin validate . --profile directory`, then submit through the developer portal (see the Claude Code plugin docs). The directory takes the icon (`.claude-plugin/icon.png`) only on the first submission.
+To list it in Anthropic's plugin directory, submit this repository (not the `claude-plugins` catalogue, whose entry points here) at [claude.ai/directory/manage](https://claude.ai/directory/manage). The portal follows `main`, so new commits are scanned without a new submission. It takes the plugin's icon only on the first submission.
+
+Some findings are expected and go to a reviewer rather than blocking: `scripts/render-images.mjs` names the screenshots it writes, and `.github/workflows/release.yml` reads the Release Please token. Neither runs when someone uses the plugin.

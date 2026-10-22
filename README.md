@@ -171,16 +171,7 @@ claude plugin uninstall context-canopy
 
 ## Developing
 
-```
-git clone https://github.com/jonw09/claude-context-canopy
-cd claude-context-canopy
-claude --plugin-dir .          # run it from this folder
-claude plugin validate .       # check the manifest and hooks module
-claude plugin test .           # run the tests
-node scripts/render-images.mjs # redraw the README screenshots from the layout code
-```
-
-How it's built is in [docs/DESIGN.md](docs/DESIGN.md), with mock-ups of every state in [docs/preview.html](docs/preview.html). The plugin API is early access and may change between Claude Code releases, so run the tests after updating Claude Code.
+How it's built, and how to run, test and release it, is in [docs/DESIGN.md](docs/DESIGN.md), with mock-ups of every state in [docs/preview.html](docs/preview.html). The plugin API is early access and may change between Claude Code releases, so run the tests after updating Claude Code.
 
 ## Licence
 

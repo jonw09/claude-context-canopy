@@ -15,6 +15,5 @@
     "agents",
     "subagents",
     "status"
-  ],
-  "types": "./types/index.d.ts"
+  ]
 }
