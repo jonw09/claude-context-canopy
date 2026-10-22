@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/jonw09/claude-context-canopy/compare/v0.1.3...v0.1.4) (2026-10-22)
+
+
+### Documentation
+
+* fix the README icon, which failed to load ([#16](https://github.com/jonw09/claude-context-canopy/issues/16)) ([2a557f5](https://github.com/jonw09/claude-context-canopy/commit/2a557f5151ce58e0c566d26c675b0421ab4908e9))
+
 ## [0.1.3](https://github.com/jonw09/claude-context-canopy/compare/v0.1.2...v0.1.3) (2026-10-22)
 
 
