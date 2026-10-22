@@ -87,13 +87,40 @@ For a type-check, use the `tsconfig.json` in the repo once Claude Code has loade
 
 ## Releasing
 
-`main` only changes through pull requests. CI (`.github/workflows/ci.yml`) validates the plugin and runs the tests on every one, and `.github/rulesets/main.json` is the branch rule to import in GitHub (Settings → Rules → Rulesets → New ruleset → Import a ruleset).
+Releases are made by [Release Please](https://github.com/googleapis/release-please). `main` only changes through squash-merged pull requests, and each pull request's title becomes the commit message that Release Please reads, so titles follow [Conventional Commits](https://www.conventionalcommits.org): `feat: …` for something new, `fix: …` for a bug fix, and `docs:`, `ci:`, `chore:` or `test:` for anything that shouldn't be in the changelog.
 
-1. On a branch, set the version in `.claude-plugin/plugin.json` and turn the `(unreleased)` heading in `CHANGELOG.md` into the version and date, such as `## 0.1.0 (2026-11-02)`. Open a pull request and merge it once CI passes.
-2. Pull `main` and run the live check above with `claude --plugin-dir .`.
-3. Run `claude plugin tag . --push`. It checks `plugin.json` and the marketplace entry agree, then pushes the tag `context-canopy--v<version>`.
-4. The tag starts `.github/workflows/release.yml`, which checks the tag matches `plugin.json` and the changelog entry is dated, runs the checks again, and publishes a GitHub release with that version's notes.
-5. The listing in `jonw09/claude-plugins` points at this repo, so it picks up the release with no change there.
-6. **Private repo:** only people you invite can install, and their machine needs a git credential for github.com (an SSH key, or `gh auth login` then `gh auth setup-git`).
-7. **Going public:** GitHub → Settings → General → Danger Zone → Change visibility. Nothing in the repo needs to change.
-8. **Anthropic's plugin directory:** once public, submit through the developer portal (see the Claude Code plugin docs). Run `claude plugin validate . --profile directory` first. The directory takes the icon (`.claude-plugin/icon.png`) only on the first submission.
+### One-time setup
+
+GitHub doesn't run CI on pull requests opened by a workflow's own token, and the branch rule needs CI to pass, so Release Please uses a token of yours instead.
+
+1. Create a fine-grained token at [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new):
+   - **Token name:** `Release Please (claude-context-canopy)`
+   - **Expiration:** up to a year. Note the date, as releases stop until it's renewed.
+   - **Repository access:** Only select repositories → `jonw09/claude-context-canopy`
+   - **Repository permissions:** Contents, Issues and Pull requests, each **Read and write**. Metadata turns on by itself.
+2. Copy the token, then add it to this repo under Settings → Secrets and variables → Actions → **New repository secret**, named `RELEASE_PLEASE_TOKEN`.
+
+Without the secret, Release Please still runs with the workflow's own token, but CI won't run on its pull request, so the branch rule blocks the merge. Adding the secret and pushing to the release branch again (or closing and reopening the pull request) fixes that.
+
+### Each release
+
+1. Merge pull requests as normal. After each merge to `main`, `.github/workflows/release.yml` opens or updates a pull request titled `chore(main): release <version>`. It sets the version in `.claude-plugin/plugin.json` and adds the changes to `CHANGELOG.md`.
+2. When you're ready to release, run the live check above with `claude --plugin-dir .` on `main`, then merge the release pull request once CI passes.
+3. Release Please tags the merge `v<version>` and publishes a GitHub release with the same notes.
+4. The listing in `jonw09/claude-plugins` points at this repo, so it picks up the release with no change there. People get it with `claude plugin marketplace update`, then `claude plugin update context-canopy`.
+
+How the version moves while it's below 1.0: `feat` raises the minor version (0.1.0 → 0.2.0), `fix` raises the patch (0.1.0 → 0.1.1), and a breaking change (`feat!:`) also raises the minor version. To pick a version yourself, put `Release-As: 1.0.0` on its own line in a merged pull request's description.
+
+To word a changelog entry differently from the pull request title, add this to the pull request's description before merging, with one entry per paragraph:
+
+```
+BEGIN_COMMIT_OVERRIDE
+feat: the wording you want
+
+fix: another entry
+END_COMMIT_OVERRIDE
+```
+
+### Plugin directory
+
+To list it in Anthropic's plugin directory, run `claude plugin validate . --profile directory`, then submit through the developer portal (see the Claude Code plugin docs). The directory takes the icon (`.claude-plugin/icon.png`) only on the first submission.
