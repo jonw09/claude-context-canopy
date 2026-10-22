@@ -85,7 +85,7 @@ describe('format', () => {
     expect(describeTool('Bash', { command: 'npm   test' })).toBe('Bash: npm test')
     expect(describeTool('Read', { file_path: '/repo/src/billing/invoice.ts' })).toBe('Read billing/invoice.ts')
     expect(describeTool('Grep', { pattern: 'aria-', path: '/repo/app' })).toBe('Grep "aria-" in repo/app')
-    expect(describeTool('WebFetch', { url: 'https://example.com/a/b' })).toBe('WebFetch example.com')
+    expect(describeTool('WebFetch', { url: 'docs/page' })).toBe('WebFetch docs/page')
     expect(describeTool('mcp__github__get_me', {})).toBe('github get_me')
     expect(describeTool('Edit', { file_path: '/repo/hooks/tree.ts' })).toBe('Edit hooks/tree.ts')
     expect(describeTool('Glob', { pattern: '**/*.ts' })).toBe('Glob **/*.ts')
