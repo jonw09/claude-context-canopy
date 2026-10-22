@@ -81,7 +81,7 @@ claude plugin test .              # run the tests
 
 For a type-check, use the `tsconfig.json` in the repo once Claude Code has loaded the plugin from this folder (it writes the API types to `.claude-plugin/types/`), then run `tsc -p .`.
 
-`node scripts/render-images.mjs` redraws the README screenshots from `layout.ts`, so they always match what the plugin draws.
+The README screenshots in `docs/images/` are drawn from `layout.ts`'s output. When the layout changes, redraw them so they match what the plugin draws.
 
 ### Not yet covered
 
@@ -127,5 +127,3 @@ END_COMMIT_OVERRIDE
 ### Plugin directory
 
 To list it in Anthropic's plugin directory, submit this repository (not the `claude-plugins` catalogue, whose entry points here) at [claude.ai/directory/manage](https://claude.ai/directory/manage). The portal follows `main`, so new commits are scanned without a new submission. It takes the plugin's icon only on the first submission.
-
-Some findings are expected and go to a reviewer rather than blocking: `scripts/render-images.mjs` names the screenshots it writes, and `.github/workflows/release.yml` reads the Release Please token. Neither runs when someone uses the plugin.

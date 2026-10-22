@@ -8,6 +8,9 @@
   "license": "MIT",
   "homepage": "https://github.com/jonw09/claude-context-canopy",
   "repository": "https://github.com/jonw09/claude-context-canopy",
+  "documentationUrl": "https://github.com/jonw09/claude-context-canopy#readme",
+  "supportUrl": "https://github.com/jonw09/claude-context-canopy/issues",
+  "privacyPolicyUrl": "https://github.com/jonw09/claude-context-canopy#privacy",
   "keywords": [
     "context",
     "usage",

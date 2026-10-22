@@ -149,7 +149,7 @@ If the band doesn't appear, run `/canopy status`. It lists which apps are attach
 - **Subagent windows.** Agents get a 200k context window, or 1M for `[1m]` models, unless they run on the same model as the main session.
 - **Teammates in their own pane** show in the tree with `—` for context, because their usage isn't visible to this session.
 
-## What it reads and changes
+## Privacy
 
 Context Canopy only reads, and nothing leaves your machine. It makes no network requests, calls no model and sends nothing anywhere.
 
