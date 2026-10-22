@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags: ['context-canopy--v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude plugin validate .
+      - run: claude plugin test .
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#context-canopy--v}"
+          test "$(jq -r .version .claude-plugin/plugin.json)" = "$version" || { echo "plugin.json is not at $version"; exit 1; }
+          if grep -q "^## $version (unreleased)" CHANGELOG.md; then echo "Date the $version entry in CHANGELOG.md first"; exit 1; fi
+          awk -v v="$version" '/^## /{f = ($2 == v); next} f' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "No $version entry in CHANGELOG.md"; exit 1; }
+          gh release create "$TAG" --title "Context Canopy $version" --notes-file notes.md

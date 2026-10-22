@@ -1,0 +1,14 @@
+{
+  "name": "claude-context-canopy",
+  "owner": {
+    "name": "jonw09"
+  },
+  "description": "Context Canopy for Claude Code.",
+  "plugins": [
+    {
+      "name": "context-canopy",
+      "source": "./",
+      "description": "Plan limits, session usage by model, and a live agent tree with context health, above the prompt."
+    }
+  ]
+}
