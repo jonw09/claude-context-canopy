@@ -90,7 +90,7 @@ The README screenshots in `docs/images/` are drawn from `layout.ts`'s output. Wh
 
 ## Releasing
 
-Releases are made by [Release Please](https://github.com/googleapis/release-please). `main` only changes through squash-merged pull requests, and each pull request's title becomes the commit message that Release Please reads, so titles follow [Conventional Commits](https://www.conventionalcommits.org): `feat: …` for something new, `fix: …` for a bug fix, and `docs:`, `ci:`, `chore:` or `test:` for anything that shouldn't be in the changelog.
+Releases are made by [Release Please](https://github.com/googleapis/release-please). `main` only changes through squash-merged pull requests, and each pull request's title becomes the commit message that Release Please reads, so titles follow [Conventional Commits](https://www.conventionalcommits.org): `feat: …` for something new, `fix: …` for a bug fix, and `docs:`, `ci:`, `chore:`, `test:`, `refactor:` and so on for the rest. `release-please-config.json` lists every type under `changelog-sections`, so every merged pull request appears in the changelog under its type's heading.
 
 ### One-time setup
 
@@ -112,7 +112,7 @@ Without the secret, Release Please still runs with the workflow's own token, but
 3. Release Please tags the merge `v<version>` and publishes a GitHub release with the same notes.
 4. The listing in `jonw09/claude-plugins` points at this repo, so it picks up the release with no change there. People get it with `claude plugin marketplace update`, then `claude plugin update context-canopy`.
 
-How the version moves while it's below 1.0: `feat` raises the minor version (0.1.0 → 0.2.0), `fix` raises the patch (0.1.0 → 0.1.1), and a breaking change (`feat!:`) also raises the minor version. To pick a version yourself, put `Release-As: 1.0.0` on its own line in a merged pull request's description.
+How the version moves while it's below 1.0: `feat` raises the minor version (0.1.0 → 0.2.0), any other type raises the patch (0.1.0 → 0.1.1), and a breaking change (`feat!:`) also raises the minor version. To pick a version yourself, put `Release-As: 1.0.0` on its own line in a merged pull request's description.
 
 To word a changelog entry differently from the pull request title, add this to the pull request's description before merging, with one entry per paragraph:
 
