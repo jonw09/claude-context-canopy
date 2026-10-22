@@ -42,7 +42,6 @@ declare module 'claude-code' {
       roster: AgentRow[]
       loops: Record<string, LoopLive>
       isCollapsed: boolean
-      planName: string | null
       overrides: Overrides
     }
   }

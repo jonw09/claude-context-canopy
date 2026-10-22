@@ -503,8 +503,8 @@ code, kbd { font-family: var(--f-mono); font-size: 0.86em; background: var(--chi
       files: ['docs/screenshots/* (to add)'],
       check: ['claude --plugin-dir . shows the band as in these mock-ups'] },
     { n: 8, title: 'Release', state: 'in part',
-      what: ['Done: version 0.1.0, icon at .claude-plugin/icon.png, CHANGELOG', 'Still to do: rename the repo, merge to main, tag v0.1.0, make public, submit to the plugin directory'],
-      files: ['.claude-plugin/icon.png', 'CHANGELOG.md'],
+      what: ['Done: version 0.1.0, icon, CHANGELOG', 'Still to do: rename the repo, merge to main, tag v0.1.0, make public, submit to the plugin directory'],
+      files: ['CHANGELOG.md'],
       check: ['A fresh machine can run /plugin install context-canopy --marketplace jonw09/context-canopy'] },
   ];
   const sh = document.getElementById('steps');

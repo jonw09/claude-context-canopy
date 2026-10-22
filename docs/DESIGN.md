@@ -49,7 +49,7 @@ Checked against the Claude Code 2.1.306 plugin API.
 - **No per-model cost.** The session line splits by tokens instead.
 - **No subagent window size.** 200k by default, 1M for `[1m]` models, or the main session's window when the model matches. Each agent's compaction point is its window scaled by the main session's compaction ratio.
 - **Teammates in their own terminal pane** run no loop in this process: status only, `—` for context.
-- **No plan name.** `$.session.identity()` answers only mods that organisation-managed settings install, and then gives `organizationType` (`claude_team`, `claude_enterprise`). Everyone else sees **Plan Limits**. The login file on disk was considered and left alone: it is undocumented, varies by platform and sits beside credentials.
+- **No plan name.** Claude Code doesn't tell plugins which plan you're on, so the row is headed **Plan Limits**. `$.session.identity()` gives the organisation's plan, but only to mods that organisation-managed settings install, and the directory reviews it as a credential read, so the plugin doesn't call it. The login file on disk was left alone too: it is undocumented, varies by platform and sits beside credentials.
 - **No dollar figures for spend limits.** A `spend_limit` window comes as a percentage and a reset time only.
 - **The mobile app on a cloud session attaches no drawing surface.** `$.session.surfaces()` is empty there, so nothing a plugin draws appears. `/canopy show` prints the band as text for that case.
 

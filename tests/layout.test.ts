@@ -138,22 +138,8 @@ test('an agent with no description or name still draws', async () => {
   expect(lines[lines.length - 1]).toMatch(/└─● general-purpose/)
 })
 
-describe('plan name', () => {
-  test('the top row carries the plan name, and every line stays aligned', async () => {
-    const lines = buildLines(base({ planName: 'Enterprise' })).map(text)
-    expect(lines[0]).toMatch(/^Enterprise  5h /)
-    expect(lines[2]).toMatch(/^Session     \d/)
-    expect(lines[3]).toMatch(/^Agents      ● main/)
-  })
-
-  test('a named plan with no limits says so; an unnamed one stays quiet', async () => {
-    expect(text(buildLines(base({ limits: [], planName: 'Enterprise' }))[0])).toMatch(/^Enterprise +no usage limits reported/)
-    expect(text(buildLines(base({ limits: [] }))[0])).toMatch(/^Session/)
-  })
-
-  test('the collapsed line uses it too', async () => {
-    expect(text(buildLines(base({ planName: 'Max 20x', isCollapsed: true }))[0])).toMatch(/^Max 20x 5h 48%/)
-  })
+test('with no limits reported, the plan line stays quiet once Claude has replied', async () => {
+  expect(text(buildLines(base({ limits: [] }))[0])).toMatch(/^Session/)
 })
 
 test('a long window name is kept whole, and the reset times still line up', async () => {

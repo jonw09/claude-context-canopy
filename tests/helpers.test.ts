@@ -4,7 +4,7 @@ import type { AgentRow } from '../types'
 import { apportion, clip, describeTool, tokens, until, windowLabel } from '../hooks/format'
 import { merge, splitFor, weigh } from '../hooks/estimate'
 import { familyOf, healthOf, modelLabel } from '../hooks/palette'
-import { overrideFrom, planNameFrom, settingsFrom } from '../hooks/settings'
+import { overrideFrom, settingsFrom } from '../hooks/settings'
 import { buildTree, flatten } from '../hooks/tree'
 
 const agent = (id: string, parentId?: string, status = 'running'): AgentRow => ({
@@ -161,16 +161,5 @@ describe('settings', () => {
     expect(overrideFrom('split', 'off')).toEqual({ split: false })
     expect(overrideFrom('amber', 'lots')).toBeUndefined()
     expect(overrideFrom('colour', 'on')).toBeUndefined()
-  })
-})
-
-describe('plan name', () => {
-  test('an organisation plan is read when Claude Code shares it', async () => {
-    expect(planNameFrom('claude_enterprise')).toBe('Enterprise')
-    expect(planNameFrom('claude_new_tier')).toBe('New Tier')
-  })
-
-  test('nothing shared leaves the default', async () => {
-    expect(planNameFrom()).toBeUndefined()
   })
 })

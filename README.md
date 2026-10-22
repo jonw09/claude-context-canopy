@@ -1,16 +1,8 @@
-<p align="center">
-  <img src=".claude-plugin/icon.png" width="96" alt="Context Canopy icon">
-</p>
+# Context Canopy
 
-<h1 align="center">Context Canopy</h1>
+Your plan limits, session usage and every running agent, in one band above the Claude Code prompt.
 
-<p align="center">
-  Your plan limits, session usage and every running agent, in one band above the Claude Code prompt.
-</p>
-
-<p align="center">
-  <img src="docs/images/band.png" alt="The Context Canopy band above the Claude Code prompt, showing plan windows, session usage by model and a tree of four agents with context bars in green, amber and red">
-</p>
+![The Context Canopy band above the Claude Code prompt, showing plan windows, session usage by model and a tree of four agents with context bars in green, amber and red](docs/images/band.png)
 
 ## What it shows
 
@@ -57,7 +49,7 @@ Watch the tree grow under `main`, each agent's context bar fill, and its current
 
 ### Plan
 
-<img src="docs/images/limit.png" alt="Plan line near the limit: the 5-hour window at 93% in red and the 7-day window at 71% in amber">
+![Plan line near the limit: the 5-hour window at 93% in red and the 7-day window at 71% in amber](docs/images/limit.png)
 
 - The bar shows how full the window is, coloured by the models that used it.
 - The percentage turns **amber from 60%** and **red from 90%**. You can move both with [`/canopy set`](#settings).
@@ -66,7 +58,7 @@ Watch the tree grow under `main`, each agent's context bar fill, and its current
 
 The plan line appears after Claude's first reply, when your limits are first reported.
 
-**The row's name.** Claude Code doesn't tell plugins which plan you're on, so the row is headed **Plan Limits**. If your organisation installs Context Canopy through managed settings, Claude Code shares the organisation's plan and the row is headed with it instead, for example **Enterprise**.
+**The row's name.** Claude Code doesn't tell plugins which plan you're on, so the row is headed **Plan Limits**.
 
 **Team, Enterprise and API keys.** What the line shows depends on what Claude reports for your account:
 
@@ -74,10 +66,10 @@ The plan line appears after Claude's first reply, when your limits are first rep
 | --- | --- |
 | Pro, Max, Team seats with usage limits | The 5-hour and 7-day windows |
 | A spend limit (organisations using a Claude gateway) | A `spend` window: the percentage used and when it resets. Claude reports the percentage only, not the dollar amounts. |
-| No limits reported (an uncapped seat) | Where the organisation's plan is known: `no usage limits reported`. Otherwise the line is left out. |
+| No limits reported (an uncapped seat) | The line is left out. |
 | API key | The line is left out. The session line shows what you've spent. |
 
-<img src="docs/images/enterprise.png" alt="An Enterprise band: a spend window at 64% resetting in 9 days, and the session's cost of $18.40">
+![A band for an organisation seat: a spend window at 64% resetting in 9 days, and the session's cost of $18.40](docs/images/enterprise.png)
 
 ### Session
 
@@ -85,7 +77,7 @@ Total tokens and cost for this session, with a bar and percentages split by mode
 
 ### Agents
 
-<img src="docs/images/solo.png" alt="A solo session: the main agent at 41% context, editing a file">
+![A solo session: the main agent at 41% context, editing a file](docs/images/solo.png)
 
 Each row shows:
 
@@ -121,11 +113,11 @@ These are the same 60% and 90% points as the plan line, and [`/canopy set`](#set
 | `/canopy set …` | Change a setting (see [Settings](#settings)) |
 | `/canopy reset` | Put every setting back to its default |
 
-<img src="docs/images/collapsed.png" alt="The collapsed band: one line with plan percentages, session totals, agent count, one agent needing compaction and main at 37%">
+![The collapsed band: one line with plan percentages, session totals, agent count, one agent needing compaction and main at 37%](docs/images/collapsed.png)
 
 In a narrow terminal the band drops the bars, shortens model names and keeps every number in its column:
 
-<img src="docs/images/narrow.png" width="620" alt="The band in a 60-column terminal, without bars, with percentages still in one column">
+![The band in a 60-column terminal, without bars, with percentages still in one column](docs/images/narrow.png)
 
 ## Settings
 
@@ -156,7 +148,15 @@ If the band doesn't appear, run `/canopy status`. It lists which apps are attach
 - **How tokens are counted.** Fresh input, output and cache writes count in full. Cache reads count at a tenth, which is how they're priced, so the totals reflect real usage rather than the same context re-read on every request.
 - **Subagent windows.** Agents get a 200k context window, or 1M for `[1m]` models, unless they run on the same model as the main session.
 - **Teammates in their own pane** show in the tree with `—` for context, because their usage isn't visible to this session.
-- **Private and read-only.** Nothing leaves your machine. The usage log stays in Claude Code's local plugin store, and the plugin never blocks tools, changes prompts or calls the model.
+
+## What it reads and changes
+
+Context Canopy only reads, and nothing leaves your machine. It makes no network requests, calls no model and sends nothing anywhere.
+
+- **What it reads:** this session's token counts, cost and rate-limit windows, the list of running agents, and the apps attached to the session (for `/canopy status`). As Claude works, it reads each agent's model and token counts and the tool each one calls, with that tool's main argument (a file path, search pattern or shell command), to show what each agent is doing.
+- **What it stores:** an hourly count of tokens per model, for the `≈` estimate, and your `/canopy set` choices. Both stay in Claude Code's local plugin store on this machine.
+- **What its hooks change:** nothing. Every event it hooks is passed on unchanged. It reads `agent.spawn` only for the new agent's id and model, and `tool.call` only for the activity shown in the tree. It never blocks a tool, rewrites a prompt or changes settings.
+- **What it adds:** the `/canopy` command, which it answers itself. It adds no tools and no agents, and it handles no other command.
 
 ## Update or remove
 
