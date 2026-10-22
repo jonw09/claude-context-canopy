@@ -1,6 +1,12 @@
+<div align="center">
+
+![Context Canopy icon](docs/images/icon.png)
+
 # Context Canopy
 
 Your plan limits, session usage and every running agent, in one band above the Claude Code prompt.
+
+</div>
 
 ![The Context Canopy band above the Claude Code prompt, showing plan windows, session usage by model and a tree of four agents with context bars in green, amber and red](docs/images/band.png)
 
