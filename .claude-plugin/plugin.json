@@ -1,0 +1,20 @@
+{
+  "name": "context-canopy",
+  "version": "0.1.0",
+  "description": "A band above the prompt showing plan limits, session usage by model, and a live tree of agents with context health and current activity.",
+  "author": {
+    "name": "jonw09"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/jonw09/claude-context-canopy",
+  "repository": "https://github.com/jonw09/claude-context-canopy",
+  "keywords": [
+    "context",
+    "usage",
+    "rate-limits",
+    "agents",
+    "subagents",
+    "status"
+  ],
+  "types": "./types/index.d.ts"
+}
