@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/jonw09/claude-context-canopy/compare/v0.1.2...v0.1.3) (2026-10-22)
+
+
+### Documentation
+
+* use a sharp SVG icon at the top of the README ([#14](https://github.com/jonw09/claude-context-canopy/issues/14)) ([cbb1cd0](https://github.com/jonw09/claude-context-canopy/commit/cbb1cd0456f2398c23598741902e7ed86af700aa))
+
 ## [0.1.2](https://github.com/jonw09/claude-context-canopy/compare/v0.1.1...v0.1.2) (2026-10-22)
 
 
