@@ -1,6 +1,6 @@
 <div align="center">
 
-![Context Canopy icon](docs/images/icon.png)
+![Context Canopy icon](docs/images/icon.svg)
 
 # Context Canopy
 
