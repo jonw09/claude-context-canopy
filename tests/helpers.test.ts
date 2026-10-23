@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { AgentRow } from '../types'
-import { apportion, clip, describeTool, tokens, until, windowLabel } from '../hooks/format'
-import { keepSessions, merge, monthSpend, splitFor, weigh } from '../hooks/estimate'
+import { clip, describeTool, money, tokens, until, windowLabel } from '../hooks/format'
+import { keepSessions, merge, splitFor, weigh } from '../hooks/estimate'
 import { familyOf, healthOf, modelLabel } from '../hooks/palette'
 import { overrideFrom, settingsFrom } from '../hooks/settings'
+import { monthEnd, spendFrom } from '../hooks/spend'
 import { buildTree, flatten } from '../hooks/tree'
 
 const agent = (id: string, parentId?: string, status = 'running'): AgentRow => ({
@@ -71,12 +72,6 @@ describe('format', () => {
     expect(windowLabel('seven_day_opus')).toBe('seven day opus')
   })
 
-  test('apportion always adds up', async () => {
-    const parts = apportion(14, [['opus', 3], ['sonnet', 3], ['haiku', 3]])
-    expect(parts.reduce((n, [, v]) => n + v, 0)).toBe(14)
-    expect(apportion(0, [['opus', 1]])).toEqual([['opus', 0]])
-  })
-
   test('clip', async () => {
     expect(clip('abcdef', 4)).toBe('abc…')
     expect(clip('abc', 4)).toBe('abc')
@@ -135,13 +130,59 @@ describe('estimate', () => {
     expect(Object.keys(log)).toEqual([])
   })
 
-  test('sessions are kept for 40 days, and the month sums those seen in it', async () => {
+  test('sessions are kept for 40 days', async () => {
     const day = 86_400_000
     const now = new Date(2026, 9, 21, 12).getTime()
-    const record = (usd: number, seenAt: number) => ({ usd, tokens: {}, seenAt })
-    const kept = keepSessions({ old: record(9, now - 41 * day), last: record(30, new Date(2026, 8, 30).getTime()) }, { a: record(10, now - day) }, now)
+    const record = (seenAt: number) => ({ tokens: {}, seenAt })
+    const kept = keepSessions({ old: record(now - 41 * day), last: record(new Date(2026, 8, 30).getTime()) }, { a: record(now - day) }, now)
     expect(Object.keys(kept).sort()).toEqual(['a', 'last'])
-    expect(monthSpend({ ...kept, b: record(2.5, now), current: record(99, now) }, 'current', now)).toBe(12.5)
+  })
+})
+
+describe('spend', () => {
+  const now = new Date(2026, 9, 23, 12).getTime()
+  const reply = (extra: Record<string, unknown> | null) => ({ five_hour: null, seven_day: null, extra_usage: extra })
+
+  test('reads what the usage endpoint reports, in minor units, with no limit as null', async () => {
+    expect(spendFrom(reply({ is_enabled: true, monthly_limit: null, used_credits: 108_262, utilization: null }), now)).toEqual({
+      spent: 1082.62,
+      limit: null,
+      percentUsed: null,
+      currency: 'USD',
+      resetsAt: new Date(2026, 10, 1).toISOString(),
+    })
+    expect(spendFrom(reply({ is_enabled: true, monthly_limit: 200_000, used_credits: 108_262, utilization: 54.1, currency: 'gbp' }), now)).toMatchObject({
+      limit: 2000,
+      percentUsed: 54.1,
+      currency: 'GBP',
+    })
+  })
+
+  test('works the percentage out when the reply leaves it out', async () => {
+    expect(spendFrom(reply({ is_enabled: true, monthly_limit: 10_000, used_credits: 2_500 }), now)?.percentUsed).toBe(25)
+  })
+
+  test('shows nothing for an account without extra usage, or a reply it cannot read', async () => {
+    expect(spendFrom(reply({ is_enabled: false, monthly_limit: null, used_credits: 0, utilization: null }), now)).toBeUndefined()
+    expect(spendFrom(reply(null), now)).toBeUndefined()
+    expect(spendFrom({ extra_usage: { used_credits: 'lots' } }, now)).toBeUndefined()
+    expect(spendFrom(null, now)).toBeUndefined()
+  })
+
+  test('a limit reached still shows, though extra usage has stopped', async () => {
+    expect(spendFrom(reply({ is_enabled: false, monthly_limit: 5_000, used_credits: 5_000, utilization: 100 }), now)?.percentUsed).toBe(100)
+  })
+
+  test('money', async () => {
+    expect(money(1082.62)).toBe('$1,082.62')
+    expect(money(1082.62, 'USD', false)).toBe('$1,083')
+    expect(money(2000, 'GBP', false)).toBe('£2,000')
+    expect(money(12.5, 'EUR')).toBe('€12.50')
+    expect(money(1234567.8, 'AUD')).toBe('AUD 1,234,567.80')
+  })
+
+  test('the month ends on the 1st of the next, across a year', async () => {
+    expect(monthEnd(new Date(2026, 11, 31, 23).getTime())).toBe(new Date(2027, 0, 1).toISOString())
   })
 })
 
@@ -154,6 +195,7 @@ describe('settings', () => {
       showSession: true,
       showAgents: true,
       estimate: true,
+      fetchSpend: true,
     })
   })
 
@@ -169,6 +211,7 @@ describe('settings', () => {
   test('/canopy set reads percentages and switches, and nothing else', async () => {
     expect(overrideFrom('amber', '70')).toEqual({ amber: 70 })
     expect(overrideFrom('split', 'off')).toEqual({ split: false })
+    expect(overrideFrom('spend', 'off')).toEqual({ spend: false })
     expect(overrideFrom('amber', 'lots')).toBeUndefined()
     expect(overrideFrom('colour', 'on')).toBeUndefined()
   })

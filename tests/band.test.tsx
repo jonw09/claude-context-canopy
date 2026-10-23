@@ -1,4 +1,4 @@
-import type { AgentInfo, CommandRunInput, On, SessionUsage } from 'claude-code'
+import type { AgentInfo, CommandRunInput, HttpInit, On, SessionUsage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 const BAND = {
@@ -39,6 +39,7 @@ function engine(on: On, { usage = USAGE as SessionUsage | (() => SessionUsage), 
   on('command.register', () => ({ value: { command: 'canopy' } }))
   on('session.usage', () => ({ value: typeof usage === 'function' ? usage() : usage }))
   on('agent.list', () => ({ value: agents as AgentInfo[] }))
+  on('session.surfaces', () => ({ value: [] }))
   const clock = mock.clock(on, { now: Date.parse('2026-10-21T10:00:00Z') })
   mock.store(on)
 
@@ -221,14 +222,12 @@ test('/clear starts the session figures over, and a resumed session picks its ow
     // drain the stream
   }
   expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
-  expect(await show()).toMatch(/month +≈ \$5\.00 +unlimited/)
+  expect(await show()).toMatch(/Plan Limits +month +unlimited/)
   expect(await show()).toMatch(/● main .*↑20k +↓1k/)
 
   // `/clear`: Claude Code starts a new session and its cost over, and raises no measure event for it.
   usage = { ...usage, startedAt: Date.parse('2026-10-21T10:00:00Z'), cost: { usd: 0 } }
   await clock.advance(1000)
-  // The month keeps what the first session cost.
-  expect(await show()).toMatch(/month +≈ \$5\.00 +unlimited/)
   expect(await show()).toMatch(/Session +0 tok +\$0\.00/)
   expect(await show()).not.toMatch(/↑20k/)
 
@@ -236,6 +235,70 @@ test('/clear starts the session figures over, and a resumed session picks its ow
   usage = { ...usage, startedAt: first, cost: { usd: 5 } }
   await clock.advance(1000)
   expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
+})
+
+/** Stands in for Anthropic's usage endpoint: what the account has spent, in cents, or a failure. */
+function anthropic(on: On, reply: () => { status: number; usedCents?: number; limitCents?: number | null }) {
+  const asked: { url: string; init?: HttpInit }[] = []
+  on('session.authorize', () => ({ value: { handle: 'login', kind: 'bearer' as const } }))
+  on('http.fetch', (_, e) => {
+    asked.push({ url: e.url, init: e.init })
+    const { status, usedCents = 0, limitCents = null } = reply()
+    const extra = { is_enabled: true, monthly_limit: limitCents, used_credits: usedCents, utilization: limitCents ? (usedCents / limitCents) * 100 : null }
+
+    return { value: { status, ok: status < 300, headers: {}, text: JSON.stringify({ five_hour: null, seven_day: null, extra_usage: extra }) } }
+  })
+
+  return asked
+}
+
+test("the month's spend is read from Anthropic with the session's own login, every five minutes", async ($, on) => {
+  const clock = engine(on, { usage: { ...USAGE, rateLimits: [] } as SessionUsage })
+  let reply = { status: 200, usedCents: 108_262 }
+  const asked = anthropic(on, () => reply)
+  const show = async (): Promise<string> => (await $.command.run(canopy('show 100'))).text ?? ''
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  // Before the first reply: the spend needs none.
+  expect(await show()).toMatch(/Plan Limits +month +↻ \S+ +\$1,082\.62 +unlimited/)
+  expect(asked).toEqual([{ url: 'https://api.anthropic.com/api/oauth/usage', init: { auth: 'login', headers: { 'anthropic-beta': 'oauth-2025-04-20' } } }])
+
+  reply = { status: 200, usedCents: 120_000 }
+  await clock.advance(5 * 60_000)
+  expect(await show()).toMatch(/\$1,200\.00 +unlimited/)
+
+  // A failed read keeps the last one.
+  reply = { status: 503, usedCents: 0 }
+  await clock.advance(5 * 60_000)
+  expect(await show()).toMatch(/\$1,200\.00 +unlimited/)
+  expect((await $.command.run(canopy('status'))).text).toMatch(/Spend this month: Anthropic answered 503/)
+})
+
+test('/canopy set spend off stops asking and takes the spend away', async ($, on) => {
+  const clock = engine(on, { usage: { ...USAGE, rateLimits: [] } as SessionUsage })
+  const asked = anthropic(on, () => ({ status: 200, usedCents: 5_000, limitCents: 20_000 }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await $.command.run(canopy('show 100'))).text).toMatch(/month +↻ \S+ +\$50\.00 +▆+ +25% +of \$200/)
+
+  await $.command.run(canopy('set spend off'))
+  await clock.advance(15 * 60_000)
+  expect(asked).toHaveLength(1)
+  expect((await $.command.run(canopy('show 100'))).text).not.toMatch(/\$50/)
+  expect((await $.command.run(canopy('status'))).text).toMatch(/Spend this month: off/)
+})
+
+test('without a claude.ai login, nothing is asked', async ($, on) => {
+  engine(on)
+  let fetched = 0
+  on('session.authorize', () => ({ value: null }))
+  on('http.fetch', () => {
+    fetched += 1
+
+    return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(fetched).toBe(0)
+  expect((await $.command.run(canopy('status'))).text).toMatch(/Spend this month: not available without a claude\.ai login/)
 })
 
 test('/canopy set changes a setting for later sessions, and reset puts the defaults back', async ($, on) => {

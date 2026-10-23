@@ -1,7 +1,7 @@
 {
   "name": "context-canopy",
   "version": "0.2.0",
-  "description": "A band above the prompt showing plan limits, session usage by model, and a live tree of agents with context health and current activity.",
+  "description": "A band above the prompt showing session usage by model, plan limits and monthly spend, and a live tree of agents with context health and current activity.",
   "author": {
     "name": "jonw09"
   },
@@ -10,7 +10,7 @@
   "repository": "https://github.com/jonw09/claude-context-canopy",
   "documentationUrl": "https://github.com/jonw09/claude-context-canopy#readme",
   "supportUrl": "https://github.com/jonw09/claude-context-canopy/issues",
-  "privacyPolicyUrl": "https://github.com/jonw09/claude-context-canopy#privacy",
+  "privacyPolicyUrl": "https://github.com/jonw09/claude-context-canopy/blob/main/PRIVACY.md",
   "keywords": [
     "context",
     "usage",

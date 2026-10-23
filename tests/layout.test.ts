@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { type Line, type View, buildLines, contextOf } from '../hooks/layout'
 import { settingsFrom } from '../hooks/settings'
+import type { Spend } from '../types'
 
 const SETTINGS = settingsFrom({})
 
@@ -20,7 +21,8 @@ const base = (patch: Partial<View> = {}): View => ({
   planSplit: { five_hour: { opus: 90, haiku: 10 }, seven_day: { opus: 80, haiku: 20 } },
   sessionTokens: { opus: 170_000, haiku: 14_000 },
   usd: 1.12,
-  unlimitedMonth: null,
+  spend: null,
+  isUnlimited: false,
   main: { model: 'claude-opus-5-5', tokens: 82_000, window: 200_000, compactAt: 167_000 },
   roster: [],
   loops: {},
@@ -239,58 +241,86 @@ test('a long window name is kept whole, and the reset times still line up', asyn
 })
 
 describe('accounts that spend money', () => {
-  const spend = (patch: Partial<View> = {}): View =>
-    base({
-      limits: [{ kind: 'spend_limit', percentUsed: 64, resetsAt: '2026-10-30T10:00:00Z' }],
-      planSplit: { spend_limit: { opus: 70, sonnet: 30 } },
-      sessionTokens: { opus: 210_000, sonnet: 80_000 },
-      usd: 18.4,
-      ...patch,
-    })
-  const unlimited = (patch: Partial<View> = {}): View => spend({ limits: [], unlimitedMonth: 412.8, ...patch })
+  const month = (patch: Partial<Spend> = {}): Spend => ({
+    spent: 1082.62,
+    limit: 2000,
+    percentUsed: 54,
+    currency: 'USD',
+    resetsAt: '2026-11-01T00:00:00Z',
+    ...patch,
+  })
+  const account = (patch: Partial<View> = {}): View =>
+    base({ limits: [], planSplit: {}, sessionTokens: { opus: 210_000, sonnet: 80_000 }, usd: 18.4, spend: month(), ...patch })
+  const unlimited = (patch: Partial<View> = {}): View => account({ spend: month({ limit: null, percentUsed: null }), ...patch })
 
-  test('a spend limit reads month, and the session line keeps its cost', async () => {
-    const lines = buildLines(spend()).map(text)
-    expect(lines[0]).toMatch(/^Session +290k tok +\$18\.40 +▆+ +■ Opus 72%/)
-    expect(lines[1]).toMatch(/^Plan Limits +month +↻ 9d00h +▆+ +64% +≈ ■ Opus 70% +■ Sonnet 30%/)
+  test('a spend limit reads as the session does: the amount, then how much of the limit it is', async () => {
+    const lines = buildLines(account()).map(text)
+    expect(lines[0]).toMatch(/^Session +290k tok +\$18\.40 +■ Opus 72% +■ Sonnet 28%$/)
+    expect(lines[1]).toMatch(/^Plan Limits +month +↻ 10d14h +\$1,082\.62 +▆+ +54% +of \$2,000$/)
+    expect(lines[1]!.indexOf('$1,082')).toBe(lines[0]!.indexOf('$18.40'))
     expect(lines).toHaveLength(3)
   })
 
-  test('a month barely begun still shows on its bar', async () => {
-    const lines = buildLines(spend({ limits: [{ kind: 'spend_limit', percentUsed: 2, resetsAt: '2026-10-30T10:00:00Z' }], planSplit: {} }))
-    const month = lines.find(line => text(line).startsWith('Plan Limits'))
-    expect(month?.filter(s => s.text.startsWith('▆') && !s.dim).map(s => s.text).join('')).toBe('▆')
+  test('with no spend limit, the amount stands and unlimited takes the bar', async () => {
+    const lines = buildLines(unlimited()).map(text)
+    expect(lines[1]).toMatch(/^Plan Limits +month +↻ 10d14h +\$1,082\.62 +unlimited *$/)
+    expect(lines[1]!.indexOf('unlimited')).toBe(find(lines, /^Agents/).search(/▆/))
   })
 
   test('past the limit, the month row says limited', async () => {
-    const lines = buildLines(spend({ limits: [{ kind: 'spend_limit', percentUsed: 104, resetsAt: '2026-10-30T10:00:00Z' }] })).map(text)
-    expect(find(lines, /^Plan Limits/)).toMatch(/104% +limited$/)
+    const lines = buildLines(account({ spend: month({ spent: 2080, percentUsed: 104 }) })).map(text)
+    expect(find(lines, /^Plan Limits/)).toMatch(/\$2,080\.00 +▆+ +104% +limited$/)
   })
 
-  test('with no limit reported, the month reads unlimited where the bar would be', async () => {
-    const lines = buildLines(unlimited()).map(text)
-    expect(lines[0]).toMatch(/^Session +290k tok +\$18\.40 +▆+ +■ Opus 72%/)
-    expect(lines[1]).toMatch(/^Plan Limits +month +≈ \$412\.80 +unlimited *$/)
-    expect(lines[1]!.indexOf('unlimited')).toBe(lines[2]!.search(/▆/))
+  test('beside the 5h and 7d windows, extra usage reads extra, its reset in line', async () => {
+    const lines = buildLines(base({ spend: month({ spent: 12.3, limit: 50, percentUsed: 24.6 }) })).map(text)
+    const extra = find(lines, /^Plan Limits/, 2)
+    expect(extra).toMatch(/^ +extra +↻ 10d14h +\$12\.30 +▆+ +25% +of \$50$/)
+    expect(extra.indexOf('↻')).toBe(find(lines, /^Plan Limits/).indexOf('↻'))
   })
 
-  test('with no limit reported, narrow and collapsed keep the figures', async () => {
-    expect(find(buildLines(unlimited({ width: 60 })).map(text), /^Plan Limits/)).toMatch(/month +≈ \$412\.80 +unlimited/)
-    expect(text(buildLines(unlimited({ isCollapsed: true }))[0])).toMatch(/^Session 290k tok \$18\.40 +Plan Limits month ≈ \$412\.80 unlimited +Agents 1 ●/)
+  test("a gateway's spend limit, a percentage only, reads month", async () => {
+    const lines = buildLines(
+      account({ spend: null, limits: [{ kind: 'spend_limit', percentUsed: 64, resetsAt: '2026-10-30T10:00:00Z' }], planSplit: { spend_limit: { opus: 70, sonnet: 30 } } }),
+    ).map(text)
+    expect(lines[1]).toMatch(/^Plan Limits +month +↻ 9d00h +▆+ +64% +≈ ■ Opus 70% +■ Sonnet 30%$/)
   })
 
-  test('before a reply, or once a limit has been seen, no limit is not taken for unlimited', async () => {
-    expect(buildLines(spend({ limits: [] })).map(text).join('\n')).not.toMatch(/Plan Limits|unlimited/)
+  test('with no limit and no spend reported, the month reads unlimited alone', async () => {
+    expect(find(buildLines(account({ spend: null, isUnlimited: true })).map(text), /^Plan Limits/)).toMatch(/^Plan Limits +month +unlimited *$/)
+    expect(buildLines(base({ isUnlimited: true })).map(text).join('\n')).not.toMatch(/unlimited/)
+  })
+
+  test('before a reply, with nothing reported, there is no plan line', async () => {
+    expect(buildLines(account({ spend: null })).map(text).join('\n')).not.toMatch(/Plan Limits|unlimited/)
   })
 
   test('collapsed, it reads the month after the session', async () => {
-    expect(text(buildLines(spend({ isCollapsed: true }))[0])).toMatch(/^Session 290k tok \$18\.40 +Plan Limits month 64% +Agents/)
+    expect(text(buildLines(account({ isCollapsed: true }))[0])).toMatch(/^Session 290k tok \$18\.40 +Plan Limits month \$1,082\.62 54% +Agents/)
+    expect(text(buildLines(unlimited({ isCollapsed: true }))[0])).toMatch(/Plan Limits month \$1,082\.62 unlimited +Agents/)
+    expect(text(buildLines(base({ isCollapsed: true, spend: month({ spent: 12.3 }) }))[0])).toMatch(/5h 48% · 7d 21% · extra \$12\.30 54%/)
   })
 
-  test('narrow, it keeps every number', async () => {
-    expect(find(buildLines(spend({ width: 60 })).map(text), /^Plan Limits/)).toMatch(/month +↻ 9d00h +64%/)
+  test('narrow, it keeps every number, the pence going from $1,000', async () => {
+    expect(find(buildLines(account({ width: 60 })).map(text), /^Plan Limits/)).toMatch(/month +↻ 10d14h +\$1,083 +54% +of \$2,000$/)
+    expect(find(buildLines(unlimited({ width: 60 })).map(text), /^Plan Limits/)).toMatch(/month +↻ 10d14h +\$1,083 +unlimited$/)
     for (const width of [40, 60, 72, 100, 160]) {
-      for (const v of [spend({ width }), unlimited({ width })]) for (const line of buildLines(v)) expect(text(line).length).toBeLessThanOrEqual(width)
+      for (const v of [account({ width }), unlimited({ width })]) for (const line of buildLines(v)) expect(text(line).length).toBeLessThanOrEqual(width)
     }
+  })
+})
+
+describe('bars', () => {
+  test('a bar always shows how full something is, in its health colour; models keep to legends and names', async () => {
+    const v = base({
+      spend: { spent: 12.3, limit: 50, percentUsed: 95, currency: 'USD', resetsAt: '2026-11-01T00:00:00Z' },
+      roster: [{ id: 'r', type: 'reviewer', description: 'review', status: 'running' }],
+      loops: { r: { model: 'claude-sonnet-5-5', tokens: 120_000 } },
+    })
+    const lines = buildLines(v)
+    expect(text(lines[0])).not.toMatch(/▆|■{2}/)
+    const filled = lines.flatMap(line => line.filter(s => s.text.startsWith('▆') && !s.dim))
+    expect(filled.length).toBe(5)
+    for (const s of filled) expect(['success', 'warning', 'error']).toContain(s.color)
   })
 })

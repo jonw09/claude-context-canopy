@@ -1,5 +1,5 @@
-import type { AgentRow, Family, FamilyTokens, LimitWindow, LoopLive, MainContext } from '../types'
-import { SPEND, apportion, clip, pad, tokens, until, usd, windowLabel } from './format'
+import type { AgentRow, Family, FamilyTokens, LimitWindow, LoopLive, MainContext, Spend } from '../types'
+import { SPEND, clip, money, pad, tokens, until, windowLabel } from './format'
 import { FAMILIES, FAMILY_COLOUR, HEALTH_COLOUR, type Health, familyName, familyOf, healthOf, modelLabel } from './palette'
 import type { Settings } from './settings'
 import { buildTree, flatten } from './tree'
@@ -14,8 +14,10 @@ export type View = {
   planSplit: Readonly<Record<string, FamilyTokens>>
   sessionTokens: FamilyTokens
   usd: number | null
-  /** On an account that reports no limit once Claude has replied, what this machine's sessions have cost this month; else null. */
-  unlimitedMonth: number | null
+  /** What the account has spent this billing period, from Claude Code's usage endpoint; null when that isn't known. */
+  spend: Spend | null
+  /** Whether Claude has replied and reported no limit: an account with no limit, an API key or a cloud provider. */
+  isUnlimited: boolean
   main: MainContext & LoopLive
   roster: readonly AgentRow[]
   loops: Readonly<Record<string, LoopLive>>
@@ -40,7 +42,9 @@ const GUTTER = 2
 /** The sent and received column on agent rows, its gap included. */
 const FLOW = 14
 const PLAN = 'Plan Limits'
+const MONTH = windowLabel(SPEND)
 const UNLIMITED = 'unlimited'
+const LIMITED: Seg = { text: 'limited', color: HEALTH_COLOUR.bad, bold: true }
 const DIM = { dim: true }
 const HEADING = { dim: true, bold: true }
 const GLYPH: Record<string, string> = { pending: '◌', running: '●', waiting: '◐', idle: '○' }
@@ -50,42 +54,46 @@ const healthSeg = (text: string, health: Health): Seg => seg(text, { color: HEAL
 const percent = (n: number): string => `${Math.round(n)}%`
 const total = (parts: [Family, number][]): number => parts.reduce((sum, [, n]) => sum + n, 0)
 const shares = (t: FamilyTokens): [Family, number][] => FAMILIES.flatMap(f => (t[f] ? [[f, t[f]] as [Family, number]] : []))
-const byFamily = (parts: [Family, number][]): [string, number][] => parts.map(([f, n]) => [FAMILY_COLOUR[f], n])
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 const waiting = (n: number): string | undefined => (n ? `waiting on ${plural(n, 'agent')}` : undefined)
 const gutter = (sign = '', style: Omit<Seg, 'text'> = DIM): Seg => seg(pad(sign, GUTTER), style)
 const warnGutter = (): Seg => gutter('⚠', { color: HEALTH_COLOUR.bad })
 const label = (text: string): Seg => seg(pad(text, PLAN.length + 2), HEADING)
 const planHealth = (pct: number, v: View): Health => healthOf(pct, 100, v.settings.warn, v.settings.danger)
-/** The month this machine has spent, when the account reports no limit and so has no window to draw. */
-const unlimitedMonth = (v: View): number | undefined => (v.unlimitedMonth !== null && !v.limits.length ? v.unlimitedMonth : undefined)
-const unlimitedKey = (month: number): string => `≈ ${usd(month)}`
-const resetKey = (w: LimitWindow, now: number): string => (until(w.resetsAt, now) ? `↻ ${until(w.resetsAt, now)}` : '')
+const resetKey = (resetsAt: string | undefined, now: number): string => (until(resetsAt, now) ? `↻ ${until(resetsAt, now)}` : '')
+/** The spend row's name: `extra` beside the 5h and 7d windows, as extra usage tops them up, else `month`. */
+const spendName = (v: View): string => (v.limits.length ? 'extra' : MONTH)
+/** No limit and no spend to show, so the plan line says so in a row of its own. */
+const noLimit = (v: View): boolean => v.isUnlimited && !v.limits.length && !v.spend
+/** Each plan row's name and the key after it. */
+const planKeys = (v: View): [string, string][] => [
+  ...v.limits.map((w): [string, string] => [windowLabel(w.kind), resetKey(w.resetsAt, v.now)]),
+  ...(v.spend ? [[spendName(v), resetKey(v.spend.resetsAt, v.now)] as [string, string]] : []),
+  ...(noLimit(v) ? [[MONTH, ''] as [string, string]] : []),
+]
 /** Wide enough for the longest plan row name. */
-const nameWidth = (v: View): number =>
-  Math.max(
-    ...v.limits.map(w => windowLabel(w.kind).length),
-    unlimitedMonth(v) === undefined ? 0 : windowLabel(SPEND).length,
-  ) + 2
+const nameWidth = (v: View): number => Math.max(0, ...planKeys(v).map(([name]) => name.length)) + 2
 const agentKeyRoom = (v: View): number => (v.width >= WIDE ? KEY * 1.5 : KEY)
 /** The longest agent key, guides, status and name, with a column to spare. */
 const agentKeyLength = (v: View): number =>
   v.settings.showAgents ? Math.max(0, ...flatten(buildTree(v.roster)).map(({ node, guides }) => guides.length + 3 + (node.name ?? node.type).length)) : 0
 
-/** Wide enough for every row's key, with a column to spare: a window and its reset time, the month's spend, or a long agent name on a wide terminal. */
+/** Wide enough for every row's key, with a column to spare: a plan row and its reset time, or a long agent name on a wide terminal. */
 function keyWidth(v: View, narrow: boolean): number {
-  const month = unlimitedMonth(v)
-  const plan = [...v.limits.map(w => resetKey(w, v.now)), ...(month === undefined ? [] : [unlimitedKey(month)])]
+  const agents = narrow ? KEY_NARROW : Math.min(agentKeyRoom(v), Math.max(KEY, agentKeyLength(v)))
 
-  return Math.max(narrow ? KEY_NARROW : Math.min(agentKeyRoom(v), Math.max(KEY, agentKeyLength(v))), ...plan.map(key => nameWidth(v) + key.length + 1))
+  return Math.max(agents, ...planKeys(v).map(([, key]) => nameWidth(v) + key.length + 1))
 }
 
-/** A bar `pct` full, its filled cells shared among colours by weight. Anything above nothing fills a cell. */
-function bar(pct: number, cells: number, parts: [string, number][]): Line {
-  const filled = Math.max(pct > 0 ? 1 : 0, Math.min(cells, Math.round((pct / 100) * cells)))
-  const line = apportion(filled, parts).flatMap(([color, n]) => (n ? [seg('▆'.repeat(n), { color })] : []))
+/**
+ * How full something is: a window, a spend limit or a context. Every gauge is
+ * coloured by health and nothing else, so a bar always means one thing.
+ * Anything above nothing fills a cell.
+ */
+function gauge(pct: number, health: Health): Line {
+  const filled = Math.max(pct > 0 ? 1 : 0, Math.min(BAR, Math.round((pct / 100) * BAR)))
 
-  return filled < cells ? [...line, seg('▆'.repeat(cells - filled), DIM)] : line
+  return [seg('▆'.repeat(filled), { color: HEALTH_COLOUR[health] }), seg('▆'.repeat(BAR - filled), DIM)].filter(s => s.text)
 }
 
 /** Every model with a legend anywhere in the band, so each keeps one slot down every row. */
@@ -164,32 +172,49 @@ function windowCells(w: LimitWindow, v: View, width: number): Cells {
   const parts = v.settings.estimate ? shares(v.planSplit[w.kind] ?? {}) : []
 
   return {
-    key: [seg(pad(windowLabel(w.kind), width)), seg(resetKey(w, v.now), DIM)],
-    // Coloured by model when the split is known, else by health.
-    bar: bar(w.percentUsed, BAR, parts.length ? byFamily(parts) : [[HEALTH_COLOUR[health], 1]]),
+    key: [seg(pad(windowLabel(w.kind), width)), seg(resetKey(w.resetsAt, v.now), DIM)],
+    bar: gauge(w.percentUsed, health),
     value: healthSeg(percent(w.percentUsed), health),
     detail:
-      w.percentUsed >= 100 ? [gutter(), seg('limited', { color: HEALTH_COLOUR.bad, bold: true })] : room => legend(parts, legendFamilies(v), room, '≈'),
+      w.percentUsed >= 100 ? [gutter(), LIMITED] : room => legend(parts, legendFamilies(v), room, '≈'),
   }
 }
 
-/** The month with no limit to measure it by: `unlimited` where the bar and percentage would be, or as its detail when narrow. */
-function unlimitedCells(amount: string, width: number, narrow: boolean): Cells {
+/** A row with no limit to measure it by: `unlimited` where the bar would be, or as its detail when narrow. */
+function unlimitedCells(key: Line, narrow: boolean, amount?: Seg): Cells {
+  return { key, model: amount, bar: [seg(UNLIMITED, DIM)], detail: narrow ? [gutter(), seg(UNLIMITED, DIM)] : [] }
+}
+
+/**
+ * The account's spend this billing period, laid out as the session's cost is:
+ * the amount in the model column, then how much of the limit it is and the
+ * limit, or `unlimited` where the bar would be.
+ */
+function spendCells(s: Spend, v: View, width: number, narrow: boolean): Cells {
+  const key = [seg(pad(spendName(v), width)), seg(resetKey(s.resetsAt, v.now), DIM)]
+  const amount = seg(money(s.spent, s.currency, !narrow || s.spent < 1000))
+  if (s.limit === null || s.percentUsed === null) return unlimitedCells(key, narrow, amount)
+  const health = planHealth(s.percentUsed, v)
+  const limit = money(s.limit, s.currency, !Number.isInteger(s.limit))
+
   return {
-    key: [seg(pad(windowLabel(SPEND), width)), seg(amount)],
-    bar: [seg(UNLIMITED)],
-    detail: narrow ? [gutter(), seg(UNLIMITED)] : [],
+    key,
+    model: amount,
+    bar: gauge(s.percentUsed, health),
+    value: healthSeg(percent(s.percentUsed), health),
+    detail: [gutter(), s.percentUsed >= 100 ? LIMITED : seg(`of ${limit}`, DIM)],
   }
 }
 
+/** The plan's windows, then the month's spend, or `month` alone when no limit is reported. */
 function planLines(v: View, narrow: boolean): Line[] {
-  const month = unlimitedMonth(v)
-  if (!v.limits.length && month === undefined) {
-    return shares(v.sessionTokens).length ? [] : [[label(PLAN), seg('appears after the first reply', DIM)]]
-  }
-
   const width = nameWidth(v)
-  const rows = month === undefined ? v.limits.map(w => windowCells(w, v, width)) : [unlimitedCells(unlimitedKey(month), width, narrow)]
+  const rows = [
+    ...v.limits.map(w => windowCells(w, v, width)),
+    ...(v.spend ? [spendCells(v.spend, v, width, narrow)] : []),
+    ...(noLimit(v) ? [unlimitedCells([seg(pad(MONTH, width))], narrow)] : []),
+  ]
+  if (!rows.length) return shares(v.sessionTokens).length ? [] : [[label(PLAN), seg('appears after the first reply', DIM)]]
 
   return rows.map((cells, i) => row(i ? '' : PLAN, cells, v, narrow))
 }
@@ -198,8 +223,7 @@ function sessionLine(v: View, narrow: boolean): Line {
   const parts = shares(v.sessionTokens)
   const cells: Cells = {
     key: [seg(`${tokens(total(parts))} tok`)],
-    model: v.usd === null ? undefined : seg(usd(v.usd)),
-    bar: parts.length ? bar(100, BAR, byFamily(parts)) : [],
+    model: v.usd === null ? undefined : seg(money(v.usd)),
     detail: room => legend(parts, legendFamilies(v), room),
   }
 
@@ -226,7 +250,7 @@ function agentLine(r: Row, v: View, narrow: boolean, heading: string): Line {
   const cells: Cells = {
     key: [seg(r.guides, DIM), seg(`${r.glyph} `, r.isIdle ? DIM : colour), seg(r.name, { bold: true })],
     model: seg(narrow ? model.split(' ')[0]! : model, colour),
-    bar: context ? bar(context.pct, BAR, [[HEALTH_COLOUR[context.health], 1]]) : [seg('·'.repeat(BAR), DIM)],
+    bar: context ? gauge(context.pct, context.health) : [seg('·'.repeat(BAR), DIM)],
     value: context ? healthSeg(percent(context.pct), context.health) : seg('—', DIM),
     detail: [
       warning.length ? warnGutter() : gutter(),
@@ -267,24 +291,28 @@ function agentLines(v: View, narrow: boolean, room = Infinity): Line[] {
   return shown.length < rows.length ? [...lines, moreLine(rows.slice(shown.length), v, narrow)] : lines
 }
 
-function collapsedPlan(v: View): Line {
-  const month = unlimitedMonth(v)
-  if (!v.settings.showPlan || (!v.limits.length && month === undefined)) return []
+function collapsedSpend(s: Spend, v: View): Line {
+  const amount = seg(`${spendName(v)} ${money(s.spent, s.currency)} `)
+  if (s.percentUsed === null) return [amount, seg(UNLIMITED, DIM)]
 
-  return [
-    seg(`${PLAN} `, HEADING),
-    ...(month === undefined ? [] : [seg(`${windowLabel(SPEND)} ${unlimitedKey(month)} ${UNLIMITED}`)]),
-    ...v.limits.flatMap((w, i) => [
-      seg(`${i ? ' · ' : ''}${windowLabel(w.kind)} `),
-      healthSeg(percent(w.percentUsed), planHealth(w.percentUsed, v)),
-    ]),
+  return [amount, healthSeg(percent(s.percentUsed), planHealth(s.percentUsed, v))]
+}
+
+function collapsedPlan(v: View): Line {
+  const items = [
+    ...v.limits.map(w => [seg(`${windowLabel(w.kind)} `), healthSeg(percent(w.percentUsed), planHealth(w.percentUsed, v))]),
+    ...(v.spend ? [collapsedSpend(v.spend, v)] : []),
+    ...(noLimit(v) ? [[seg(`${MONTH} `), seg(UNLIMITED, DIM)]] : []),
   ]
+  if (!v.settings.showPlan || !items.length) return []
+
+  return [seg(`${PLAN} `, HEADING), ...items.flatMap((item, i) => (i ? [seg(' · '), ...item] : item))]
 }
 
 function collapsedSession(v: View): Line {
   if (!v.settings.showSession) return []
 
-  return [seg('Session ', HEADING), seg(`${tokens(total(shares(v.sessionTokens)))} tok${v.usd === null ? '' : ` ${usd(v.usd)}`}`)]
+  return [seg('Session ', HEADING), seg(`${tokens(total(shares(v.sessionTokens)))} tok${v.usd === null ? '' : ` ${money(v.usd)}`}`)]
 }
 
 function collapsedAgents(v: View): Line {
@@ -308,7 +336,7 @@ function collapsedLine(v: View): Line {
   return parts.filter(part => part.length).flatMap((part, i) => (i ? [seg('   '), ...part] : part))
 }
 
-export function clipLine(line: Line, columns: number): Line {
+function clipLine(line: Line, columns: number): Line {
   const out: Line = []
   let left = columns
   for (const s of line) {

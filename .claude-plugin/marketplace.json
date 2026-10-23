@@ -8,7 +8,7 @@
     {
       "name": "context-canopy",
       "source": "./",
-      "description": "Plan limits, session usage by model, and a live agent tree with context health, above the prompt."
+      "description": "Session usage by model, plan limits and monthly spend, and a live agent tree with context health, above the prompt."
     }
   ]
 }
