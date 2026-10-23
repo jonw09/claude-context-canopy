@@ -33,11 +33,11 @@ const canopy = (args: string): CommandRunInput => ({
   presentation: { isFullscreen: false, columns: 100 },
 })
 
-/** Stands in for the engine beneath the plugin, and starts the session. */
-function engine(on: On, { usage = USAGE, agents = [] as Partial<AgentInfo>[] } = {}) {
+/** Stands in for the engine beneath the plugin, and starts the session. `usage` may be read afresh on each call. */
+function engine(on: On, { usage = USAGE as SessionUsage | (() => SessionUsage), agents = [] as Partial<AgentInfo>[] } = {}) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', () => ({ value: { command: 'canopy' } }))
-  on('session.usage', () => ({ value: usage }))
+  on('session.usage', () => ({ value: typeof usage === 'function' ? usage() : usage }))
   on('agent.list', () => ({ value: agents as AgentInfo[] }))
   const clock = mock.clock(on, { now: Date.parse('2026-10-21T10:00:00Z') })
   mock.store(on)
@@ -67,6 +67,21 @@ test('the band shows plan, session and the agent tree on terminal and desktop', 
     expect(await ui.find({ type: 'Text', text: /Find callers/ })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('a tree taller than the band gives way, after a blank row, so the plan line still shows', async ($, on) => {
+  const clock = engine(on, {
+    agents: Array.from({ length: 12 }, (_, i) => ({ id: `a${i}`, type: 'Explore', description: `task ${i}`, status: 'running' })),
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(1000)
+
+  // Eight rows: the margin, session and plan leave five for the tree, main and three agents, then the row for the other nine.
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, maxRows: 8 } })
+  expect(await ui.find({ type: 'Text', text: /\+9 more agents/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /48%/ })).toBeDefined()
+  expect((await ui.find({ type: 'Box' }))?.props.marginTop).toBe(1)
+  await ui.unmount()
 })
 
 test('/canopy collapses the band to one line and back', async ($, on) => {
@@ -130,6 +145,8 @@ test('each model request feeds the session split and the agent row', async ($, o
   // 155k of a 200k window is 78%, and past 90% of the 167k compaction point.
   expect(await ui.find({ type: 'Text', text: /78%/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /compacts soon/ })).toBeDefined()
+  // Sent: 2k + 3k + 150k / 10; received: 1k.
+  expect(await ui.find({ type: 'Text', text: /↑20k +↓1k/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -137,9 +154,88 @@ test('/canopy show prints the band as text for hosts that draw nothing', async (
   engine(on)
   await $.session.start({ cwd: '/', surface: 'mobile', isInteractive: true })
   const shown = await $.command.run(canopy('show 60'))
-  expect(shown.text).toMatch(/^```\nPlan Limits +5h .*48%/)
-  expect(shown.text).toMatch(/Agents +● main/)
+  expect(shown.text).toMatch(/^```\nSession .*\nPlan Limits +5h .*48%\nAgents +● main.*\n```$/)
   for (const line of (shown.text ?? '').split('\n')) expect(line.length).toBeLessThanOrEqual(60)
+})
+
+test('on a spend limit, the plan line reads month, and the session line keeps its cost', async ($, on) => {
+  let usage = { ...USAGE, rateLimits: [{ kind: 'spend_limit', percentUsed: 61, resetsAt: '2099-01-01T00:00:00Z' }] } as SessionUsage
+  engine(on, { usage: () => usage })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  usage = { ...usage, rateLimits: [{ kind: 'spend_limit', percentUsed: 64.2, resetsAt: '2099-01-01T00:00:00Z' }], cost: { usd: 18.4 } }
+  await $.session.measure({ context: usage.context, rateLimits: usage.rateLimits, cost: usage.cost, changed: ['rateLimits', 'cost'] })
+
+  const shown = (await $.command.run(canopy('show 100'))).text ?? ''
+  expect(shown).toMatch(/Plan Limits +month .*64%/)
+  expect(shown).toMatch(/Session +0 tok +\$18\.40/)
+})
+
+test('the main row shows the active model before the first message, and follows a switch', async ($, on) => {
+  let model = 'claude-opus-5-5'
+  const clock = engine(on)
+  on('session.model', () => ({ value: model }))
+  // Requests are served by Haiku, as a fallback would.
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses: [],
+      stopReason: 'end_turn' as const,
+      usage: { model: 'claude-haiku-5-5', input_tokens: 1_000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await $.command.run(canopy('show 100'))).text).toMatch(/● main +Opus 5\.5 /)
+
+  model = 'claude-sonnet-5-5'
+  await clock.advance(1000)
+  expect((await $.command.run(canopy('show 100'))).text).toMatch(/● main +Sonnet 5\.5 /)
+
+  // A request served by a fallback model shows that model, and the poll leaves it be.
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model, messageCount: 1 })) {
+    // drain the stream
+  }
+  await clock.advance(1000)
+  expect((await $.command.run(canopy('show 100'))).text).toMatch(/● main +Haiku 5\.5 /)
+})
+
+test('/clear starts the session figures over, and a resumed session picks its own back up', async ($, on) => {
+  const first = Date.parse('2026-10-21T08:00:00Z')
+  let usage = { ...USAGE, startedAt: first, rateLimits: [], cost: { usd: 5 } } as SessionUsage
+  const clock = engine(on, { usage: () => usage })
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses: [],
+      stopReason: 'end_turn' as const,
+      usage: { model: 'claude-sonnet-5-5', input_tokens: 20_000, output_tokens: 1_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    }
+  })
+  const show = async (): Promise<string> => (await $.command.run(canopy('show 100'))).text ?? ''
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-sonnet-5-5', messageCount: 1 })) {
+    // drain the stream
+  }
+  expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
+  expect(await show()).toMatch(/month +≈ \$5\.00 +unlimited/)
+  expect(await show()).toMatch(/● main .*↑20k +↓1k/)
+
+  // `/clear`: Claude Code starts a new session and its cost over, and raises no measure event for it.
+  usage = { ...usage, startedAt: Date.parse('2026-10-21T10:00:00Z'), cost: { usd: 0 } }
+  await clock.advance(1000)
+  // The month keeps what the first session cost.
+  expect(await show()).toMatch(/month +≈ \$5\.00 +unlimited/)
+  expect(await show()).toMatch(/Session +0 tok +\$0\.00/)
+  expect(await show()).not.toMatch(/↑20k/)
+
+  // Resuming the first session brings its cost back, and its tokens with it.
+  usage = { ...usage, startedAt: first, cost: { usd: 5 } }
+  await clock.advance(1000)
+  expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
 })
 
 test('/canopy set changes a setting for later sessions, and reset puts the defaults back', async ($, on) => {

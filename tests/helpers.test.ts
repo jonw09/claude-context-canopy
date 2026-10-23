@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { AgentRow } from '../types'
 import { apportion, clip, describeTool, tokens, until, windowLabel } from '../hooks/format'
-import { merge, splitFor, weigh } from '../hooks/estimate'
+import { keepSessions, merge, monthSpend, splitFor, weigh } from '../hooks/estimate'
 import { familyOf, healthOf, modelLabel } from '../hooks/palette'
 import { overrideFrom, settingsFrom } from '../hooks/settings'
 import { buildTree, flatten } from '../hooks/tree'
@@ -67,6 +67,7 @@ describe('format', () => {
   test('window labels, known and new', async () => {
     expect(windowLabel('five_hour')).toBe('5h')
     expect(windowLabel('seven_day')).toBe('7d')
+    expect(windowLabel('spend_limit')).toBe('month')
     expect(windowLabel('seven_day_opus')).toBe('seven day opus')
   })
 
@@ -132,6 +133,15 @@ describe('estimate', () => {
     const day = 86_400_000
     const log = merge({ [String(0)]: { opus: 1 } }, {}, 20 * day)
     expect(Object.keys(log)).toEqual([])
+  })
+
+  test('sessions are kept for 40 days, and the month sums those seen in it', async () => {
+    const day = 86_400_000
+    const now = new Date(2026, 9, 21, 12).getTime()
+    const record = (usd: number, seenAt: number) => ({ usd, tokens: {}, seenAt })
+    const kept = keepSessions({ old: record(9, now - 41 * day), last: record(30, new Date(2026, 8, 30).getTime()) }, { a: record(10, now - day) }, now)
+    expect(Object.keys(kept).sort()).toEqual(['a', 'last'])
+    expect(monthSpend({ ...kept, b: record(2.5, now), current: record(99, now) }, 'current', now)).toBe(12.5)
   })
 })
 

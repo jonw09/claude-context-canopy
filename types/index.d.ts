@@ -7,6 +7,13 @@ export type Overrides = Partial<Record<'amber' | 'red', number> & Record<'plan' 
 
 export type LimitWindow = { kind: string; percentUsed: number; resetsAt?: string }
 
+/** What one session has used, kept so a resumed session picks it up again and the month can be summed. */
+export type SessionRecord = {
+  usd: number
+  tokens: FamilyTokens
+  seenAt: number
+}
+
 export type AgentRow = {
   id: string
   parentId?: string
@@ -21,10 +28,15 @@ export type LoopLive = {
   model?: string
   /** Input tokens of its last request, which is what its context holds. */
   tokens?: number
+  /** Tokens it has sent and received, counted as the session line counts them; for `main`, since this session started here. */
+  sent?: number
+  received?: number
   activity?: string
 }
 
 export type MainContext = {
+  /** The main loop's model as `/model` shows it, before any request has said which model served it. */
+  model?: string
   tokens?: number
   window?: number
   /** Where auto-compaction runs; absent when it is off. */
@@ -37,6 +49,9 @@ declare module 'claude-code' {
       limits: LimitWindow[]
       main: MainContext
       usd: number | null
+      sessionAt: number | null
+      limitsSeen: boolean
+      hasReplied: boolean
       sessionTokens: FamilyTokens
       planSplit: Record<string, FamilyTokens>
       roster: AgentRow[]

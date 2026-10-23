@@ -20,7 +20,10 @@ export function until(iso: string | undefined, now: number): string {
   return `${Math.floor(hours / 24)}d${two(hours % 24)}h`
 }
 
-const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
+/** A Claude gateway's spend limit, which Claude Code calls the monthly spend limit. */
+export const SPEND = 'spend_limit'
+
+const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '7d', [SPEND]: 'month' }
 
 export const windowLabel = (kind: string): string => WINDOW_LABEL[kind] ?? kind.replace(/_/g, ' ')
 
