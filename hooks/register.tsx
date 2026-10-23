@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, Timer, TurnUsage } from 'claude-code'
+import type { EngineInterface, Register, SessionUsage, Timer, TurnUsage } from 'claude-code'
 
 import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides } from '../types'
-import { type UsageLog, addTo, hourOf, merge, splitFor, weigh } from './estimate'
+import { type SessionLog, type UsageLog, addTo, hourOf, keepSessions, merge, monthSpend, sentBy, splitFor, weigh } from './estimate'
 import { describeTool } from './format'
 import { type Line, buildLines } from './layout'
 import { familyOf } from './palette'
@@ -10,13 +10,22 @@ import { overrideFrom, settingsFrom } from './settings'
 import { isLive } from './tree'
 
 const MAIN = 'main'
+/** Blank rows between the transcript and the band. */
+const MARGIN = 1
 const LOG_KEY = 'usage-log'
+const SESSIONS_KEY = 'sessions'
 const SETTINGS_KEY = 'settings'
 const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|split on|off, or /canopy reset.'
 
 const limits = atom({ plugin: 'context-canopy', key: 'limits' } as const, [] as LimitWindow[])
 const main = atom({ plugin: 'context-canopy', key: 'main' } as const, {} as MainContext)
 const usd = atom({ plugin: 'context-canopy', key: 'usd' } as const, null as number | null)
+/** The start time of the session the session figures belong to (`$.session.usage().startedAt`). */
+const sessionAt = atom({ plugin: 'context-canopy', key: 'sessionAt' } as const, null as number | null)
+/** Whether any limit has been reported, so a window that lapses unread is not taken for no limit. */
+const limitsSeen = atom({ plugin: 'context-canopy', key: 'limitsSeen' } as const, false)
+/** Whether a request has been answered since the band loaded, after which limits have been reported if there are any. */
+const hasReplied = atom({ plugin: 'context-canopy', key: 'hasReplied' } as const, false)
 const sessionTokens = atom({ plugin: 'context-canopy', key: 'sessionTokens' } as const, {} as FamilyTokens)
 const planSplit = atom({ plugin: 'context-canopy', key: 'planSplit' } as const, {} as Record<string, FamilyTokens>)
 const roster = atom({ plugin: 'context-canopy', key: 'roster' } as const, [] as AgentRow[])
@@ -25,6 +34,7 @@ const isCollapsed = atom({ plugin: 'context-canopy', key: 'isCollapsed' } as con
 const overrides = atom({ plugin: 'context-canopy', key: 'overrides' } as const, {} as Overrides)
 
 let log: UsageLog = {}
+let sessions: SessionLog = {}
 let pending: UsageLog = {}
 let timers: Timer[] = []
 let asks: Record<string, { count: number; columns: number; lines: number }> = {}
@@ -48,24 +58,75 @@ async function refreshPlanSplit($: EngineInterface): Promise<void> {
   await update($, planSplit, () => Object.fromEntries(windows.map(w => [w.kind, splitFor(all, w.kind, w.resetsAt, now)])))
 }
 
+/** Saves the current session's figures beside those other sessions on this machine saved. */
+async function saveSession($: EngineInterface): Promise<void> {
+  const at = await read($, sessionAt)
+  if (at === null) return
+  const now = await $.clock.now()
+  const record = { usd: (await read($, usd)) ?? 0, tokens: await read($, sessionTokens), seenAt: now }
+  sessions = keepSessions(((await $.store.get(SESSIONS_KEY)) ?? {}) as SessionLog, { [at]: record }, now)
+  await $.store.set(SESSIONS_KEY, sessions)
+}
+
 async function flush($: EngineInterface): Promise<void> {
+  await saveSession($)
   if (!Object.keys(pending).length) return
   log = merge(((await $.store.get(LOG_KEY)) ?? {}) as UsageLog, pending, await $.clock.now())
   pending = {}
   await $.store.set(LOG_KEY, log)
 }
 
-/** `withThreshold` also asks where auto-compaction runs, a local estimate that only moves with the window. */
-async function measure($: EngineInterface, withThreshold: boolean): Promise<void> {
-  const usage = await $.session.usage(withThreshold ? { breakdown: 'summary' } : undefined)
+/**
+ * Moves the session figures to the session that started at `startedAt`. A
+ * resumed session picks up what it saved; `/clear` starts a new session, and
+ * the figures over, as Claude Code does with the session's cost.
+ */
+async function followSession($: EngineInterface, startedAt: number): Promise<void> {
+  if ((await read($, sessionAt)) === startedAt) return
+  await saveSession($)
+  const saved = sessions[startedAt]
+  await update($, sessionTokens, () => saved?.tokens ?? {})
+  await setLoop($, MAIN, { sent: undefined, received: undefined })
+  await update($, sessionAt, () => startedAt)
+}
+
+/** Takes in a reading of the session's usage; one without a breakdown keeps the compaction point it had. */
+async function apply($: EngineInterface, usage: SessionUsage): Promise<void> {
   const breakdown = usage.context.breakdown
+  await followSession($, usage.startedAt)
   await update($, limits, () => usage.rateLimits.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt })))
+  if (usage.rateLimits.length) await update($, limitsSeen, () => true)
   await update($, usd, () => usage.cost?.usd ?? null)
   await update($, main, before => ({
+    ...before,
     tokens: usage.context.tokens,
     window: usage.context.window,
     compactAt: breakdown ? (breakdown.isAutoCompactEnabled ? breakdown.autoCompactThreshold : undefined) : before.compactAt,
   }))
+}
+
+/** `withThreshold` also asks where auto-compaction runs, a local estimate that only moves with the window. */
+async function measure($: EngineInterface, withThreshold: boolean): Promise<void> {
+  await apply($, await $.session.usage(withThreshold ? { breakdown: 'summary' } : undefined))
+}
+
+/** Takes in a fresh reading when the session changed or its cost moved, which `/clear` does without a measure event. */
+async function followUsage($: EngineInterface): Promise<void> {
+  const usage = await $.session.usage()
+  const isSame = usage.startedAt === (await read($, sessionAt)) && (usage.cost?.usd ?? null) === (await read($, usd))
+  if (!isSame) await apply($, usage)
+}
+
+/**
+ * Keeps the main row on the session's model from the start, before any request.
+ * On a switch, the last request's model gives way to the new one; otherwise it
+ * stands, so a fallback shows.
+ */
+async function followModel($: EngineInterface): Promise<void> {
+  const model = await $.session.model()
+  if (!model || model === (await read($, main)).model) return
+  await update($, main, before => ({ ...before, model }))
+  await setLoop($, MAIN, { model: undefined })
 }
 
 async function pollAgents($: EngineInterface): Promise<void> {
@@ -82,30 +143,48 @@ async function recordStep($: EngineInterface, id: string, model: string, usage: 
 
     return
   }
+  // The limits this response reported are read first, so a plan with limits never shows unlimited.
+  await followUsage($)
+  await update($, hasReplied, () => true)
   const family = familyOf(usage.model)
   const weight = weigh(usage)
   const hour = hourOf(await $.clock.now())
-  await setLoop($, id, { model: usage.model, tokens: usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens })
+  const prior = (await read($, loops))[id] ?? {}
+  await setLoop($, id, {
+    model: usage.model,
+    tokens: usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens,
+    sent: (prior.sent ?? 0) + sentBy(usage),
+    received: (prior.received ?? 0) + usage.output_tokens,
+  })
   await update($, sessionTokens, all => addTo(all, family, weight))
   pending = { ...pending, [hour]: addTo(pending[hour] ?? {}, family, weight) }
   await refreshPlanSplit($)
 }
 
-async function snapshot($: EngineInterface, width: number, collapsed?: boolean): Promise<Line[]> {
+/** The band as lines for `width` columns; `collapsed` overrides the person's choice, and `maxRows` caps the tree. */
+async function snapshot($: EngineInterface, width: number, { collapsed, maxRows }: { collapsed?: boolean; maxRows?: number } = {}): Promise<Line[]> {
   const allLoops = await read($, loops)
+  const mainContext = await read($, main)
+  const now = await $.clock.now()
+  const cost = await read($, usd)
+  const tokensSoFar = await read($, sessionTokens)
+  const windows = await read($, limits)
+  const isUnlimited = !windows.length && !(await read($, limitsSeen)) && (await read($, hasReplied))
 
   return buildLines({
     width,
-    now: await $.clock.now(),
-    limits: await read($, limits),
+    now,
+    limits: windows,
     planSplit: await read($, planSplit),
-    sessionTokens: await read($, sessionTokens),
-    usd: await read($, usd),
-    main: { ...(await read($, main)), ...allLoops[MAIN] },
+    sessionTokens: tokensSoFar,
+    usd: cost,
+    unlimitedMonth: isUnlimited ? monthSpend(sessions, String(await read($, sessionAt)), now) + (cost ?? 0) : null,
+    main: { ...mainContext, ...allLoops[MAIN], model: allLoops[MAIN]?.model ?? mainContext.model },
     roster: await read($, roster),
     loops: allLoops,
     isCollapsed: collapsed ?? (await read($, isCollapsed)),
     settings: settingsFrom(await read($, overrides)),
+    maxRows,
   })
 }
 
@@ -134,6 +213,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     log = ((await $.store.get(LOG_KEY)) ?? {}) as UsageLog
+    sessions = ((await $.store.get(SESSIONS_KEY)) ?? {}) as SessionLog
     const saved = ((await $.store.get(SETTINGS_KEY)) ?? {}) as Overrides
     await update($, overrides, () => saved)
     await $.command.register({
@@ -141,9 +221,13 @@ export const register: Register = on => {
       description: 'Collapse, expand or adjust the Context Canopy band',
       argumentHint: '[collapse|expand|show [width]|status|set <setting> <value>|reset]',
     })
+    await quietly(followModel($))
     await quietly(measure($, true).then(() => refreshPlanSplit($)))
     for (const timer of timers) timer.cancel()
-    timers = [$.clock.every(1000, () => void quietly(pollAgents($))), $.clock.every(60_000, () => void quietly(flush($)))]
+    timers = [
+      $.clock.every(1000, () => void quietly(Promise.all([pollAgents($), followModel($), followUsage($)]))),
+      $.clock.every(60_000, () => void quietly(flush($))),
+    ]
 
     return started
   })
@@ -208,7 +292,7 @@ export const register: Register = on => {
     }
     if (arg === 'show') {
       const width = Math.min(Number(size) >= 30 ? Number(size) : e.presentation.columns || 60, 160)
-      const lines = await snapshot($, width, false)
+      const lines = await snapshot($, width, { collapsed: false })
 
       return { text: ['```', ...lines.map(line => line.map(s => s.text).join('').trimEnd()), '```'].join('\n') }
     }
@@ -224,12 +308,13 @@ export const register: Register = on => {
     ask.columns = e.props.bodyColumns
     try {
       const { Box, Text } = $.ui.resolve(e)
-      const lines = await snapshot($, e.props.bodyColumns)
+      // The margin counts against the band's rows, so the tree gives way in time and the engine never scrolls the band.
+      const lines = await snapshot($, e.props.bodyColumns, { maxRows: e.props.maxRows - MARGIN })
       ask.lines = lines.length
       if (!lines.length) return next(e)
 
       return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" marginTop={MARGIN}>
           {lines.map((line, i) => (
             <Box key={`line-${i}`}>
               <Text wrap="truncate">
