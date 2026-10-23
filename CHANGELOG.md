@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/jonw09/claude-context-canopy/compare/v0.2.0...v0.3.0) (2026-10-23)
+
+
+### Features
+
+* read the month's spend from Anthropic and make every bar a health gauge ([#23](https://github.com/jonw09/claude-context-canopy/issues/23)) ([4063a50](https://github.com/jonw09/claude-context-canopy/commit/4063a50dcfbd473cb5774aeba48e48d402032b96))
+
 ## [0.2.0](https://github.com/jonw09/claude-context-canopy/compare/v0.1.5...v0.2.0) (2026-10-23)
 
 
