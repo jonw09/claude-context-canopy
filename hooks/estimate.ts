@@ -49,14 +49,6 @@ export function keepSessions(log: SessionLog, sessions: SessionLog, now: number)
   return Object.fromEntries(Object.entries({ ...log, ...sessions }).filter(([, s]) => s.seenAt >= now - KEEP_SESSIONS))
 }
 
-/** What the sessions last seen this calendar month cost, all but `current`. */
-export function monthSpend(log: SessionLog, current: string, now: number): number {
-  const today = new Date(now)
-  const start = new Date(today.getFullYear(), today.getMonth(), 1).getTime()
-
-  return Object.entries(log).reduce((spent, [key, s]) => (key !== current && s.seenAt >= start ? spent + s.usd : spent), 0)
-}
-
 /** Tokens by family logged in the window that resets at `resetsAt`; an hour counts if any of it falls inside. */
 export function splitFor(log: UsageLog, kind: string, resetsAt: string | undefined, now: number): FamilyTokens {
   const end = resetsAt ? Date.parse(resetsAt) : now

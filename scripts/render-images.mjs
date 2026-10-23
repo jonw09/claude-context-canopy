@@ -54,7 +54,8 @@ const view = patch => ({
   planSplit: { five_hour: { opus: 58, sonnet: 27, haiku: 15 }, seven_day: { opus: 64, sonnet: 24, haiku: 12 } },
   sessionTokens: { opus: 337_000, sonnet: 190_000, haiku: 85_000 },
   usd: 4.87,
-  unlimitedMonth: null,
+  spend: null,
+  isUnlimited: false,
   main: { ...MAIN, tokens: 74_000, sent: 318_600, received: 18_400, activity: undefined },
   roster: [],
   loops: {},
@@ -103,8 +104,12 @@ const CROWD = {
   maxRows: 11,
 }
 
+// What the usage endpoint reports for the month: spent, and the limit, or none.
+const MONTH = { spent: 1082.62, currency: 'USD', resetsAt: '2026-11-01T00:00:00Z' }
+
 const ORGANISATION = {
-  planSplit: { spend_limit: { opus: 70, sonnet: 30 } },
+  limits: [],
+  planSplit: {},
   sessionTokens: { opus: 210_000, sonnet: 80_000 },
   usd: 18.4,
   main: { ...MAIN, tokens: 52_000, sent: 196_000, received: 14_000, activity: 'Read infra/main.tf' },
@@ -122,12 +127,12 @@ const SCREENS = [
   {
     file: 'enterprise.png',
     title: 'Enterprise with a spend limit',
-    v: view({ ...ORGANISATION, ...CROWD, limits: [{ kind: 'spend_limit', percentUsed: 64, resetsAt: at(13_000) }] }),
+    v: view({ ...ORGANISATION, ...CROWD, spend: { ...MONTH, limit: 2000, percentUsed: 54.1 } }),
   },
   {
     file: 'unlimited.png',
     title: 'Enterprise with no spend limit',
-    v: view({ ...ORGANISATION, ...CROWD, limits: [], unlimitedMonth: 412.8 }),
+    v: view({ ...ORGANISATION, ...CROWD, spend: { ...MONTH, limit: null, percentUsed: null } }),
   },
   {
     file: 'limit.png',
@@ -139,6 +144,16 @@ const SCREENS = [
       ],
       main: { ...MAIN, tokens: 151_000, sent: 318_600, received: 18_400, activity: 'Bash: npm test' },
     }),
+  },
+  {
+    file: 'extra.png',
+    title: 'Pro or Max with extra usage turned on',
+    v: view({ ...TEAM, spend: { ...MONTH, spent: 12.3, limit: 50, percentUsed: 24.6 } }),
+  },
+  {
+    file: 'no-limit.png',
+    title: 'An API key: no limit reported',
+    v: view({ ...ORGANISATION, ...TEAM, isUnlimited: true }),
   },
   { file: 'collapsed.png', title: 'Collapsed with /canopy', v: view({ ...TEAM, isCollapsed: true }) },
   { file: 'narrow.png', title: 'A narrow terminal (60 columns)', v: view({ ...TEAM, width: 60 }) },

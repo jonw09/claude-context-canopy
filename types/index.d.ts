@@ -3,13 +3,22 @@ export type Family = 'fable' | 'opus' | 'sonnet' | 'haiku' | 'other'
 export type FamilyTokens = Partial<Record<Family, number>>
 
 /** What `/canopy set` has changed from the defaults. */
-export type Overrides = Partial<Record<'amber' | 'red', number> & Record<'plan' | 'session' | 'agents' | 'split', boolean>>
+export type Overrides = Partial<Record<'amber' | 'red', number> & Record<'plan' | 'session' | 'agents' | 'split' | 'spend', boolean>>
 
 export type LimitWindow = { kind: string; percentUsed: number; resetsAt?: string }
 
-/** What one session has used, kept so a resumed session picks it up again and the month can be summed. */
+/** What the account has spent this billing period, as Claude Code's `/usage` reads it, in major units of `currency`. */
+export type Spend = {
+  spent: number
+  /** The monthly spend limit; null when there is none. */
+  limit: number | null
+  percentUsed: number | null
+  currency: string
+  resetsAt: string
+}
+
+/** What one session has used, kept so a resumed session picks it up again. */
 export type SessionRecord = {
-  usd: number
   tokens: FamilyTokens
   seenAt: number
 }
@@ -49,6 +58,7 @@ declare module 'claude-code' {
       limits: LimitWindow[]
       main: MainContext
       usd: number | null
+      spend: Spend | null
       sessionAt: number | null
       limitsSeen: boolean
       hasReplied: boolean

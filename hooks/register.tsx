@@ -1,12 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionUsage, Timer, TurnUsage } from 'claude-code'
 
-import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides } from '../types'
-import { type SessionLog, type UsageLog, addTo, hourOf, keepSessions, merge, monthSpend, sentBy, splitFor, weigh } from './estimate'
+import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides, Spend } from '../types'
+import { type SessionLog, type UsageLog, addTo, hourOf, keepSessions, merge, sentBy, splitFor, weigh } from './estimate'
 import { describeTool } from './format'
 import { type Line, buildLines } from './layout'
 import { familyOf } from './palette'
 import { overrideFrom, settingsFrom } from './settings'
+import { USAGE_URL, spendFrom } from './spend'
 import { isLive } from './tree'
 
 const MAIN = 'main'
@@ -15,11 +16,15 @@ const MARGIN = 1
 const LOG_KEY = 'usage-log'
 const SESSIONS_KEY = 'sessions'
 const SETTINGS_KEY = 'settings'
-const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|split on|off, or /canopy reset.'
+const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|split|spend on|off, or /canopy reset.'
+/** How often the spend is asked for, and the soonest it is asked again after a reply. */
+const SPEND_EVERY = 5 * 60_000
+const SPEND_AFTER_REPLY = 60_000
 
 const limits = atom({ plugin: 'context-canopy', key: 'limits' } as const, [] as LimitWindow[])
 const main = atom({ plugin: 'context-canopy', key: 'main' } as const, {} as MainContext)
 const usd = atom({ plugin: 'context-canopy', key: 'usd' } as const, null as number | null)
+const spend = atom({ plugin: 'context-canopy', key: 'spend' } as const, null as Spend | null)
 /** The start time of the session the session figures belong to (`$.session.usage().startedAt`). */
 const sessionAt = atom({ plugin: 'context-canopy', key: 'sessionAt' } as const, null as number | null)
 /** Whether any limit has been reported, so a window that lapses unread is not taken for no limit. */
@@ -39,6 +44,9 @@ let pending: UsageLog = {}
 let timers: Timer[] = []
 let asks: Record<string, { count: number; columns: number; lines: number }> = {}
 let lastError = ''
+/** When the spend was last asked for, and what came of it, for `/canopy status`. */
+let spendAskedAt = 0
+let spendNote = 'not asked yet'
 
 /** The band only observes: a failure is kept for `/canopy status` and never reaches Claude's work. */
 const quietly = (work: Promise<unknown>): Promise<unknown> =>
@@ -63,7 +71,7 @@ async function saveSession($: EngineInterface): Promise<void> {
   const at = await read($, sessionAt)
   if (at === null) return
   const now = await $.clock.now()
-  const record = { usd: (await read($, usd)) ?? 0, tokens: await read($, sessionTokens), seenAt: now }
+  const record = { tokens: await read($, sessionTokens), seenAt: now }
   sessions = keepSessions(((await $.store.get(SESSIONS_KEY)) ?? {}) as SessionLog, { [at]: record }, now)
   await $.store.set(SESSIONS_KEY, sessions)
 }
@@ -129,6 +137,40 @@ async function followModel($: EngineInterface): Promise<void> {
   await setLoop($, MAIN, { model: undefined })
 }
 
+/**
+ * Asks Anthropic what the account has spent this billing period, as Claude
+ * Code's `/usage` does, at most once in `soonest` ms. The host holds the
+ * session's login and sends it to Anthropic alone; the plugin never sees it.
+ * Not asked with `/canopy set spend off` or without a claude.ai login (an API
+ * key, a gateway or a cloud provider). A failed read keeps the last one.
+ */
+async function fetchSpend($: EngineInterface, soonest = 0): Promise<void> {
+  const now = await $.clock.now()
+  if (now - spendAskedAt < soonest) return
+  spendAskedAt = now
+  if (!settingsFrom(await read($, overrides)).fetchSpend) {
+    spendNote = 'off (/canopy set spend on to show it)'
+    await update($, spend, () => null)
+
+    return
+  }
+  const auth = await $.session.authorize()
+  if (auth?.kind !== 'bearer') {
+    spendNote = 'not available without a claude.ai login'
+
+    return
+  }
+  const reply = await $.http.fetch(USAGE_URL, { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
+  if (!reply.ok) {
+    spendNote = `Anthropic answered ${reply.status}; showing the last reading`
+
+    return
+  }
+  const found = spendFrom(JSON.parse(reply.text), now) ?? null
+  spendNote = found ? 'read from Anthropic' : 'none reported for this account'
+  await update($, spend, () => found)
+}
+
 async function pollAgents($: EngineInterface): Promise<void> {
   const rows = (await $.agent.list()).map(({ id, parentId, type, name, description, status }) => ({ id, parentId, type, name, description, status }))
   if (JSON.stringify(rows) === JSON.stringify(await read($, roster))) return
@@ -165,20 +207,17 @@ async function recordStep($: EngineInterface, id: string, model: string, usage: 
 async function snapshot($: EngineInterface, width: number, { collapsed, maxRows }: { collapsed?: boolean; maxRows?: number } = {}): Promise<Line[]> {
   const allLoops = await read($, loops)
   const mainContext = await read($, main)
-  const now = await $.clock.now()
-  const cost = await read($, usd)
-  const tokensSoFar = await read($, sessionTokens)
   const windows = await read($, limits)
-  const isUnlimited = !windows.length && !(await read($, limitsSeen)) && (await read($, hasReplied))
 
   return buildLines({
     width,
-    now,
+    now: await $.clock.now(),
     limits: windows,
     planSplit: await read($, planSplit),
-    sessionTokens: tokensSoFar,
-    usd: cost,
-    unlimitedMonth: isUnlimited ? monthSpend(sessions, String(await read($, sessionAt)), now) + (cost ?? 0) : null,
+    sessionTokens: await read($, sessionTokens),
+    usd: await read($, usd),
+    spend: await read($, spend),
+    isUnlimited: !windows.length && !(await read($, limitsSeen)) && (await read($, hasReplied)),
     main: { ...mainContext, ...allLoops[MAIN], model: allLoops[MAIN]?.model ?? mainContext.model },
     roster: await read($, roster),
     loops: allLoops,
@@ -195,6 +234,7 @@ async function statusReport($: EngineInterface): Promise<string> {
   return [
     `Surfaces attached: ${surfaces.join(', ') || 'none'}`,
     `Band asked for by: ${drawn.join('; ') || 'no surface yet'}`,
+    `Spend this month: ${spendNote}${spendAskedAt ? `, ${Math.round(((await $.clock.now()) - spendAskedAt) / 60_000)}m ago` : ''}`,
     `Last error: ${lastError || 'none'}`,
   ].join('\n')
 }
@@ -209,6 +249,8 @@ async function setOverrides($: EngineInterface, change: (now: Overrides) => Over
 
 export const register: Register = on => {
   pending = {}
+  spendAskedAt = 0
+  spendNote = 'not asked yet'
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -223,10 +265,12 @@ export const register: Register = on => {
     })
     await quietly(followModel($))
     await quietly(measure($, true).then(() => refreshPlanSplit($)))
+    await quietly(fetchSpend($))
     for (const timer of timers) timer.cancel()
     timers = [
       $.clock.every(1000, () => void quietly(Promise.all([pollAgents($), followModel($), followUsage($)]))),
       $.clock.every(60_000, () => void quietly(flush($))),
+      $.clock.every(SPEND_EVERY, () => void quietly(fetchSpend($))),
     ]
 
     return started
@@ -267,6 +311,8 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     await quietly(setLoop($, e.agentId ?? MAIN, { activity: undefined }))
+    // A reply may have spent more; asked at most once a minute however many replies come.
+    if (!e.agentId) await quietly(fetchSpend($, SPEND_AFTER_REPLY))
 
     return next(e)
   })
@@ -287,8 +333,11 @@ export const register: Register = on => {
     if (arg === 'reset') return { text: await setOverrides($, () => ({})) }
     if (arg === 'set') {
       const change = overrideFrom(size, value)
+      if (!change) return { text: USAGE_HINT }
+      const text = await setOverrides($, now => ({ ...now, ...change }))
+      if ('spend' in change) await quietly(fetchSpend($))
 
-      return { text: change ? await setOverrides($, now => ({ ...now, ...change })) : USAGE_HINT }
+      return { text }
     }
     if (arg === 'show') {
       const width = Math.min(Number(size) >= 30 ? Number(size) : e.presentation.columns || 60, 160)
