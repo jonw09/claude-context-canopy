@@ -22,16 +22,37 @@ Each model keeps one colour everywhere: **Fable** violet, **Opus** magenta, **So
 
 ## Install
 
-You need Claude Code 2.1.306 or newer.
+You need Claude Code 2.1.306 or newer. There are two ways to install it. Pick one only: installing both shows two bands.
+
+### Option 1: through my plugin marketplace (recommended)
+
+Adds [jonw09/claude-plugins](https://github.com/jonw09/claude-plugins), then installs Context Canopy from it. My other plugins then show up in your plugin browser, ready to install if you want them. Nothing else is installed.
 
 **In Claude Code** (at the prompt of a terminal session), run these one at a time:
+
+```
+/plugin marketplace add jonw09/claude-plugins
+/plugin install context-canopy@jonw09
+```
+
+**From a shell:**
+
+```
+claude plugin install context-canopy --marketplace jonw09/claude-plugins
+```
+
+**In the desktop app:** click **+** next to the prompt box, choose **Plugins**, then **Add marketplace** and enter `jonw09/claude-plugins`, then **Add plugin**.
+
+### Option 2: on its own
+
+Installs Context Canopy straight from this repo, for when it's the only plugin of mine you want.
+
+**In Claude Code:**
 
 ```
 /plugin marketplace add jonw09/claude-context-canopy
 /plugin install context-canopy@claude-context-canopy
 ```
-
-Press Enter to install for your user. The band appears straight away.
 
 **From a shell:**
 
@@ -39,9 +60,9 @@ Press Enter to install for your user. The band appears straight away.
 claude plugin install context-canopy --marketplace jonw09/claude-context-canopy
 ```
 
-**In the desktop app:** click **+** next to the prompt box, choose **Plugins**, then **Add marketplace** and enter `jonw09/claude-context-canopy`, then **Add plugin**.
+**In the desktop app:** as above, but enter `jonw09/claude-context-canopy` as the marketplace.
 
-It's also listed in [jonw09/claude-plugins](https://github.com/jonw09/claude-plugins) alongside my other plugins, where it installs as `context-canopy@jonw09`.
+When asked, press Enter to install for your user. The band appears straight away.
 
 ## Try it
 
@@ -167,10 +188,10 @@ Context Canopy only reads, and nothing leaves your machine. It makes no network 
 
 ## Update or remove
 
-From a shell (restart Claude Code after an update):
+From a shell (restart Claude Code after an update). Update the marketplace you installed from: `jonw09` for option 1, `claude-context-canopy` for option 2.
 
 ```
-claude plugin marketplace update claude-context-canopy
+claude plugin marketplace update jonw09
 claude plugin update context-canopy
 claude plugin disable context-canopy
 claude plugin uninstall context-canopy

@@ -110,7 +110,7 @@ Without the secret, Release Please still runs with the workflow's own token, but
 1. Merge pull requests as normal. After each merge to `main`, `.github/workflows/release.yml` opens or updates a pull request titled `chore(main): release <version>`. It sets the version in `.claude-plugin/plugin.json` and adds the changes to `CHANGELOG.md`.
 2. When you're ready to release, run the live check above with `claude --plugin-dir .` on `main`, then merge the release pull request once CI passes.
 3. Release Please tags the merge `v<version>` and publishes a GitHub release with the same notes.
-4. The listing in `jonw09/claude-plugins` points at this repo, so it picks up the release with no change there. People get it with `claude plugin marketplace update`, then `claude plugin update context-canopy`.
+4. The listing in `jonw09/claude-plugins` points at this repo, so it picks up the release with no change there. People get it by updating the marketplace they installed from (`jonw09` or `claude-context-canopy`) with `claude plugin marketplace update`, then running `claude plugin update context-canopy`.
 
 How the version moves while it's below 1.0: `feat` raises the minor version (0.1.0 → 0.2.0), any other type raises the patch (0.1.0 → 0.1.1), and a breaking change (`feat!:`) also raises the minor version. To pick a version yourself, put `Release-As: 1.0.0` on its own line in a merged pull request's description.
 
