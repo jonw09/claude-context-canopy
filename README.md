@@ -154,6 +154,7 @@ If the band doesn't appear, run `/canopy status`. It lists which apps are attach
 - **How tokens are counted.** Fresh input, output and cache writes count in full. Cache reads count at a tenth, which is how they're priced, so the totals reflect real usage rather than the same context re-read on every request.
 - **Subagent windows.** Agents get a 200k context window, or 1M for `[1m]` models, unless they run on the same model as the main session.
 - **Teammates in their own pane** show in the tree with `—` for context, because their usage isn't visible to this session.
+- **Claude Code updates.** Context Canopy uses Claude Code's plugin API, which is still in early access, so a Claude Code update can occasionally break the band. If it disappears, run `/canopy status`, update the plugin, and [report a problem](https://github.com/jonw09/claude-context-canopy/issues) if that doesn't fix it.
 
 ## Privacy
 
@@ -174,10 +175,6 @@ claude plugin update context-canopy
 claude plugin disable context-canopy
 claude plugin uninstall context-canopy
 ```
-
-## Developing
-
-How it's built, and how to run, test and release it, is in [docs/DESIGN.md](docs/DESIGN.md), with mock-ups of every state in [docs/preview.html](docs/preview.html). The plugin API is early access and may change between Claude Code releases, so run the tests after updating Claude Code.
 
 ## Licence
 
