@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/jonw09/claude-context-canopy/compare/v0.1.5...v0.2.0) (2026-10-23)
+
+
+### Features
+
+* show Enterprise spend by the month, add per-agent token counts, and fit the band to its room ([#21](https://github.com/jonw09/claude-context-canopy/issues/21)) ([90581df](https://github.com/jonw09/claude-context-canopy/commit/90581df10affb76d5bf23f3838836347fe38a675))
+
 ## [0.1.5](https://github.com/jonw09/claude-context-canopy/compare/v0.1.4...v0.1.5) (2026-10-23)
 
 
