@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.5](https://github.com/jonw09/claude-context-canopy/compare/v0.1.4...v0.1.5) (2026-10-23)
+
+
+### Documentation
+
+* offer the plugin marketplace as the main install route ([#18](https://github.com/jonw09/claude-context-canopy/issues/18)) ([ee33d9a](https://github.com/jonw09/claude-context-canopy/commit/ee33d9ab9adb1bd59ac1cab4e90cffaf1d8bb52c))
+* write the README for people using the plugins only ([#19](https://github.com/jonw09/claude-context-canopy/issues/19)) ([3ea23ff](https://github.com/jonw09/claude-context-canopy/commit/3ea23ffb7eb5b7e1a97e723ac05c3d46fcbe4d51))
+
 ## [0.1.4](https://github.com/jonw09/claude-context-canopy/compare/v0.1.3...v0.1.4) (2026-10-22)
 
 
