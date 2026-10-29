@@ -14,6 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           # A personal access token, so CI also runs on the release pull request.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+      # The plugin directory tracks the `release` branch, so it scans a new version only when a release is cut.
+      - if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@v4
+      - if: ${{ steps.release.outputs.release_created }}
+        run: git push origin "${{ steps.release.outputs.sha }}:refs/heads/release"

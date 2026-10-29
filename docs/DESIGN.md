@@ -146,6 +146,6 @@ END_COMMIT_OVERRIDE
 
 ### Plugin directory
 
-To list it in Anthropic's plugin directory, submit this repository (not the `claude-plugins` catalogue, whose entry points here) at [claude.ai/directory/manage](https://claude.ai/directory/manage). The portal follows `main`, so new commits are scanned without a new submission. It takes the plugin's icon only on the first submission.
+To list it in Anthropic's plugin directory, submit this repository (not the `claude-plugins` catalogue, whose entry points here) at [claude.ai/directory/manage](https://claude.ai/directory/manage). The portal follows the `release` branch, which `.github/workflows/release.yml` moves to each release commit once Release Please has tagged it, so the directory scans a new version only when a release is cut, not on every merge to `main`. It takes the plugin's icon only on the first submission.
 
 Some findings are expected and go to a reviewer rather than blocking: `scripts/render-images.mjs` names the screenshots it writes, and `.github/workflows/release.yml` reads the Release Please token. Neither runs when someone uses the plugin. The spend request (`$.session.authorize()` with `$.http.fetch`) may be reviewed too: it goes to Anthropic alone, the host holds the login, and [PRIVACY.md](../PRIVACY.md) and the manifest's `privacyPolicyUrl` say so.
