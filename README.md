@@ -250,9 +250,9 @@ Context Canopy is a mod: code that hooks events in Claude Code. It never blocks,
 | --- | --- |
 | `session.start`, `session.end` | Loads and saves its numbers and settings, registers `/canopy`, and starts and stops its timers |
 | `session.measure`, `turn.start`, `turn.step`, `turn.complete` | Reads the session's model, token counts, cost and plan limits to draw the band. After a reply it may ask Anthropic for the month's spend (at most once a minute) |
-| `tool.call` | Reads the tool's name and main argument (a file path, command, search or site) to show what an agent is doing, and holds it in memory. The call itself goes ahead untouched: the plugin doesn't run it, block it or alter it |
-| `agent.spawn` | Reads the new agent's id and model. The spawn goes ahead untouched |
-| `command.run` | Answers `/canopy` itself and ignores every other command |
+| `tool.call` | Reads the tool's name and main argument (a file path, command, search or site) to show what an agent is doing, and holds it in memory. The hook changes nothing: the call goes ahead untouched, and the plugin doesn't run it, block it or alter it |
+| `agent.spawn` | Reads the new agent's id and model. The hook changes nothing: the spawn goes ahead untouched, with the agent's settings, instructions and tools as they were |
+| `command.run` | Answers `/canopy` itself. Every other command passes through untouched |
 | `ui.render` | Draws the band above the prompt |
 
 It runs no commands, starts no processes and calls no tools or models of its own.
