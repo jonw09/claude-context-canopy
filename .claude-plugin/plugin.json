@@ -6,6 +6,7 @@
     "name": "jonw09"
   },
   "license": "MIT",
+  "icon": "./.claude-plugin/icon.png",
   "homepage": "https://github.com/jonw09/claude-context-canopy",
   "repository": "https://github.com/jonw09/claude-context-canopy",
   "documentationUrl": "https://github.com/jonw09/claude-context-canopy#readme",

@@ -16,3 +16,49 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude plugin validate . --strict
       - run: claude plugin test .
+
+  # The directory's own rules for a plugin folder, which `claude plugin validate` does not apply.
+  # The plugin folder is the repository root, so every tracked file counts.
+  directory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the directory's file and listing rules
+        shell: bash
+        run: |
+          fail=0
+          bad() { echo "::error::$1"; fail=1; }
+
+          name=$(jq -r .name .claude-plugin/plugin.json)
+          [[ "$name" =~ ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ ]] || bad "plugin name '$name' must be lowercase letters, digits and hyphens, up to 64 characters"
+
+          jq -e '.description and .author.name and .version and .license' .claude-plugin/plugin.json >/dev/null || bad "plugin.json needs description, author.name, version and license"
+          [ -f LICENSE ] || jq -e .license .claude-plugin/plugin.json >/dev/null || bad "no LICENSE file or license field"
+
+          icon=$(jq -r '.icon // empty' .claude-plugin/plugin.json)
+          [ -n "$icon" ] && [ -f "$icon" ] || bad "plugin.json icon is missing or points at no file"
+          for key in privacyPolicyUrl documentationUrl supportUrl; do
+            jq -e --arg k "$key" '.[$k] | startswith("https://")' .claude-plugin/plugin.json >/dev/null || bad "$key must be an https:// URL"
+          done
+
+          words=$(awk '/^```/ { skip = !skip; next } !skip' README.md | wc -w)
+          [ "$words" -ge 40 ] || bad "README has $words words outside code blocks, the directory needs 40"
+
+          files=$(git ls-files)
+          [ "$(echo "$files" | wc -l)" -le 512 ] || bad "more than 512 files"
+          [ ! -f .gitmodules ] || bad "git submodules are not accepted"
+          git ls-files -s | grep -q '^120000' && bad "symbolic links are not accepted"
+          echo "$files" | grep -Ei '(^|/)(\.DS_Store|Thumbs\.db|desktop\.ini|__MACOSX)(/|$)' && bad "system files are not accepted"
+
+          while IFS= read -r f; do
+            size=$(stat -c %s "$f")
+            case "$f" in
+              *.png|*.jpg|*.jpeg|*.gif|*.webp|*.woff|*.woff2|*.ttf|*.otf) ;;
+              *)
+                [ "$size" -lt 262144 ] || bad "$f is over 256 KiB"
+                grep -qI . "$f" || [ ! -s "$f" ] || bad "$f is a binary file, which the directory holds for a reviewer"
+                ;;
+            esac
+          done <<< "$files"
+
+          exit $fail

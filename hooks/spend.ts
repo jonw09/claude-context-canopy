@@ -1,8 +1,5 @@
 import type { Spend } from '../types'
 
-/** Where Claude Code's own `/usage` reads the account's spend for the billing period. */
-export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
-
 const isNumber = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
 
 /** The 1st of next month, local time, when Claude Code says the spend resets. */
@@ -13,7 +10,7 @@ export function monthEnd(now: number): string {
 }
 
 /**
- * The spend in a reply from the usage endpoint, from its `extra_usage`, in minor
+ * The spend in a reply from `https://api.anthropic.com/api/oauth/usage` (where Claude Code's own `/usage` reads it), from its `extra_usage`, in minor
  * units: what has been spent this billing period, and the monthly limit, null
  * when there is none. Undefined when the account has no spend to show: extra
  * usage off and nothing spent, or a reply this plugin can't read.
