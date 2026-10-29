@@ -240,7 +240,7 @@ If the band doesn't appear, run `/canopy status`. It lists which apps are attach
 
 Context Canopy keeps everything on your machine, with one exception: it asks Anthropic what your account has spent this month, the same request Claude Code's own `/usage` makes. Claude Code signs that request with your login and sends it to Anthropic alone, and the plugin never sees your credentials. It sends nothing about your work. `/canopy set spend off` stops it.
 
-Otherwise it calls no model, sends nothing anywhere and changes nothing: every event it hooks is passed on unchanged. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
+Otherwise it calls no model, sends nothing anywhere and changes nothing: every event it hooks is passed on unchanged. To show what each agent is doing, it reads the tool each agent calls and that call's main argument (a file path, command or search), and holds it in memory for the session only. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
 
 [PRIVACY.md](PRIVACY.md) sets out exactly what it reads, sends, keeps and adds.
 
