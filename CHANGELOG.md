@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/jonw09/claude-context-canopy/compare/v0.3.0...v0.3.1) (2026-10-29)
+
+
+### Documentation
+
+* make the privacy notes match the mod and address the directory's review findings ([#25](https://github.com/jonw09/claude-context-canopy/issues/25)) ([cd6a6ed](https://github.com/jonw09/claude-context-canopy/commit/cd6a6ed6ea25f9d7c0821e5b8d1ee4d5055c46f4))
+
 ## [0.3.0](https://github.com/jonw09/claude-context-canopy/compare/v0.2.0...v0.3.0) (2026-10-23)
 
 
