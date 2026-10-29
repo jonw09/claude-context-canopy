@@ -242,6 +242,23 @@ Context Canopy keeps everything on your machine, with one exception: it asks Ant
 
 Otherwise it calls no model, sends nothing anywhere and changes nothing: every event it hooks is passed on unchanged. To show what each agent is doing, it reads the tool each agent calls and that call's main argument (a file path, command or search), and holds it in memory for the session only. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
 
+### What it hooks, and what it does with each
+
+Context Canopy is a mod: code that hooks events in Claude Code. It never blocks, changes or runs anything, and passes every event on unchanged.
+
+| Event | What it does |
+| --- | --- |
+| `session.start`, `session.end` | Loads and saves its numbers and settings, registers `/canopy`, and starts and stops its timers |
+| `session.measure`, `turn.start`, `turn.step`, `turn.complete` | Reads the session's model, token counts, cost and plan limits to draw the band. After a reply it may ask Anthropic for the month's spend (at most once a minute) |
+| `tool.call` | Reads the tool's name and main argument (a file path, command, search or site) to show what an agent is doing, and holds it in memory. The call itself goes ahead untouched: the plugin doesn't run it, block it or alter it |
+| `agent.spawn` | Reads the new agent's id and model. The spawn goes ahead untouched |
+| `command.run` | Answers `/canopy` itself and ignores every other command |
+| `ui.render` | Draws the band above the prompt |
+
+It runs no commands, starts no processes and calls no tools or models of its own.
+
+**What it sends, and where.** One fixed address, `https://api.anthropic.com/api/oauth/usage`, and nothing else. The request has no body: nothing from your conversation, tool calls or files goes with it. The plugin never reads your credential. It asks Claude Code for a handle to the login, and Claude Code attaches the credential itself, for Anthropic's own servers only. The reply is your account's spend figures, which stay in memory. `/canopy set spend off` stops the request.
+
 [PRIVACY.md](PRIVACY.md) sets out exactly what it reads, sends, keeps and adds.
 
 ## Update or remove

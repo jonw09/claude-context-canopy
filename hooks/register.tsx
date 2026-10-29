@@ -7,7 +7,7 @@ import { describeTool } from './format'
 import { type Line, buildLines } from './layout'
 import { familyOf } from './palette'
 import { overrideFrom, settingsFrom } from './settings'
-import { USAGE_URL, spendFrom } from './spend'
+import { spendFrom } from './spend'
 import { isLive } from './tree'
 
 const MAIN = 'main'
@@ -160,7 +160,8 @@ async function fetchSpend($: EngineInterface, soonest = 0): Promise<void> {
 
     return
   }
-  const reply = await $.http.fetch(USAGE_URL, { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
+  // The one network call: a fixed address and its options, written out here so it can be read at a glance.
+  const reply = await $.http.fetch('https://api.anthropic.com/api/oauth/usage', { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
   if (!reply.ok) {
     spendNote = `Anthropic answered ${reply.status}; showing the last reading`
 
