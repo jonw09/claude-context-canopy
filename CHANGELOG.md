@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.2](https://github.com/jonw09/claude-context-canopy/compare/v0.3.1...v0.3.2) (2026-10-29)
+
+
+### Documentation
+
+* say plainly that the tool.call, agent.spawn and command.run hooks change nothing ([#28](https://github.com/jonw09/claude-context-canopy/issues/28)) ([4a8af86](https://github.com/jonw09/claude-context-canopy/commit/4a8af860cb70b67461598af5a62432aaa6141ba9))
+
+
+### Continuous Integration
+
+* validate against the plugin directory's profile ([#27](https://github.com/jonw09/claude-context-canopy/issues/27)) ([804375b](https://github.com/jonw09/claude-context-canopy/commit/804375bedf3a50b6e1adc343afd04841297ab0d9))
+
 ## [0.3.1](https://github.com/jonw09/claude-context-canopy/compare/v0.3.0...v0.3.1) (2026-10-29)
 
 

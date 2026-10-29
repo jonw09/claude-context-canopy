@@ -1,6 +1,6 @@
 {
   "name": "context-canopy",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "A band above the prompt showing session usage by model, plan limits and monthly spend, and a live tree of agents with context health and current activity.",
   "author": {
     "name": "jonw09"
