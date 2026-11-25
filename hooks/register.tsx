@@ -4,7 +4,7 @@ import type { EngineInterface, Register, SessionUsage, Timer, TurnUsage } from '
 import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides, Spend } from '../types'
 import { type SessionLog, type UsageLog, addTo, hourOf, keepSessions, merge, sentBy, splitFor, weigh } from './estimate'
 import { describeTool } from './format'
-import { type Line, buildLines } from './layout'
+import { type Line, type Seg, buildLines } from './layout'
 import { familyOf } from './palette'
 import { overrideFrom, settingsFrom } from './settings'
 import { spendFrom } from './spend'
@@ -47,6 +47,23 @@ let lastError = ''
 /** When the spend was last asked for, and what came of it, for `/canopy status`. */
 let spendAskedAt = 0
 let spendNote = 'not asked yet'
+
+/** Text every monospaced face draws a cell to the character: printable ASCII. */
+const PLAIN = /^[\x20-\x7e]+$/
+
+/**
+ * `text` as runs of printable ASCII, and of any other character repeated, such as
+ * a bar's blocks. Layout counts a character's cells by its length, so a run's
+ * length is its width.
+ */
+const runs = (text: string): string[] => text.match(/[\x20-\x7e]+|([^])\1*/gu) ?? []
+
+/**
+ * Block elements, which fill their cells: the bars' `▆`. Drawn wider by a
+ * fallback face, they are cut at the run's last cell, so a bar never reaches
+ * its percentage. Other glyphs draw whole, as a space always follows them.
+ */
+const FILL = /^[\u2580-\u259f]+$/
 
 /** The band only observes: a failure is kept for `/canopy status` and never reaches Claude's work. */
 const quietly = (work: Promise<unknown>): Promise<unknown> =>
@@ -363,19 +380,38 @@ export const register: Register = on => {
       ask.lines = lines.length
       if (!lines.length) return next(e)
 
+      // The terminal is a grid of cells already. Elsewhere the band asks for the surface's monospaced
+      // cell, and glyphs past ASCII take a Box of their cells, so a glyph the face lacks can't widen its row.
+      const onGrid = e.surface === 'terminal'
+      const style = (s: Seg) => ({ color: s.color, dimColor: s.dim, bold: s.bold })
+
       return (
-        <Box flexDirection="column" marginTop={MARGIN}>
-          {lines.map((line, i) => (
-            <Box key={`line-${i}`}>
-              <Text wrap="truncate">
-                {line.map(s => (
-                  <Text color={s.color} dimColor={s.dim} bold={s.bold}>
-                    {s.text}
-                  </Text>
-                ))}
-              </Text>
-            </Box>
-          ))}
+        <Box flexDirection="column" marginTop={MARGIN} mono={onGrid ? undefined : true}>
+          {lines.map((line, i) =>
+            onGrid ? (
+              <Box key={`line-${i}`}>
+                <Text wrap="truncate">
+                  {line.map(s => (
+                    <Text {...style(s)}>{s.text}</Text>
+                  ))}
+                </Text>
+              </Box>
+            ) : (
+              <Box key={`line-${i}`} overflow="hidden">
+                {line.flatMap(s =>
+                  runs(s.text).map(run =>
+                    PLAIN.test(run) ? (
+                      <Text {...style(s)}>{run}</Text>
+                    ) : (
+                      <Box width={run.length} flexShrink={0} overflow={FILL.test(run) ? 'hidden' : undefined}>
+                        <Text {...style(s)}>{run}</Text>
+                      </Box>
+                    ),
+                  ),
+                )}
+              </Box>
+            ),
+          )}
         </Box>
       )
     } catch (err) {

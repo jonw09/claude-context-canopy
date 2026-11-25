@@ -6,6 +6,7 @@ const BAND = {
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: true,
     maxRows: 20,
     bodyColumns: 100,
@@ -64,8 +65,55 @@ test('the band shows plan, session and the agent tree on terminal and desktop', 
     expect(await ui.find({ type: 'Text', text: /48%/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /\$1\.12/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Bash: npm test/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /└─/ })).toBeDefined()
+    // Off the terminal each glyph of the guide has a cell of its own.
+    expect(await ui.find({ type: 'Text', text: /└/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Find callers/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+/** The Box and Text elements the band draws, as `ui.drawn()` gives them. */
+type Drawn = { type: string; props?: Record<string, unknown>; children?: (Drawn | string)[] }
+
+/** A drawn element's text, its own and its children's. */
+const textOf = (node: Drawn | string): string => (typeof node === 'string' ? node : (node.children ?? []).map(textOf).join(''))
+
+test('off the terminal, the band keeps to the monospaced cell, glyphs past ASCII held to their cells', async ($, on) => {
+  const clock = engine(on, { agents: [{ id: 'r', type: 'reviewer', description: 'Review the billing change', status: 'running' }] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(1000)
+
+  const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  const grid = (await terminal.drawn()) as unknown as Drawn
+  // The terminal is a grid already, so it draws each row as one Text, as before.
+  expect(grid.props?.mono).toBeUndefined()
+  await terminal.unmount()
+
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    const band = (await ui.drawn()) as unknown as Drawn
+    expect(band.props?.mono).toBe(true)
+    const rows = (band.children ?? []) as Drawn[]
+    expect(rows.map(textOf).join('\n')).toMatch(/▆{12}/)
+    // A bar is one Box for its fill and one for the rest: 48% of 12 cells is 6.
+    expect(await ui.find({ type: 'Text', text: /^▆{6}$/ })).toBeDefined()
+    for (const line of rows) {
+      let cells = 0
+      for (const part of (line.children ?? []) as Drawn[]) {
+        const text = textOf(part)
+        if (part.type === 'Box') {
+          // A glyph a face lacks is drawn by another, wider or narrower: its Box holds it to its cells,
+          // and a bar's block is cut there, so it never reaches the percentage.
+          expect(text).not.toMatch(/^[\x20-\x7e]+$/)
+          expect(part.props?.width).toBe(text.length)
+          expect(part.props?.overflow).toBe(/^▆+$/.test(text) ? 'hidden' : undefined)
+        } else {
+          expect(text).toMatch(/^[\x20-\x7e]+$/)
+        }
+        cells += text.length
+      }
+      expect(cells).toBeLessThanOrEqual(BAND.props.bodyColumns)
+    }
     await ui.unmount()
   }
 })

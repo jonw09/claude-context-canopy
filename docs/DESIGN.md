@@ -79,6 +79,7 @@ Checked against the Claude Code 2.1.309 plugin API.
 - **Finished agents drop off** at once. Their running children move up to the nearest live ancestor.
 - **"Waiting on N agents"** counts direct helpers only. Deeper ones show under the agent that started them.
 - **One grid for every row.** Label, key, model, bar, percentage, then detail (legend or activity), so bars, percentages and details line up down the band. Money goes in the model column, so the session's cost and the month's spend sit one above the other. The key column widens for a long window name or reset time, and from 120 columns for long agent names, up to 30 columns (half as much again). It always keeps a blank column before the model.
+- **The grid holds off the terminal too.** The desktop app, VS Code and the phones draw text in a proportional face, where spaces are narrow and a glyph the face lacks comes from a fallback of its own width, so the band's padding drifted and its bars ran long. There the band asks for the surface's monospaced cell (`mono` on its Box), and each run of glyphs past ASCII (`▆`, `■`, `↻`, `●`, the tree's guides) goes in a Box as wide as its cells. A bar's blocks are cut at their last cell so a wide fallback never reaches the percentage; other glyphs draw whole, as a space always follows them. The terminal is a grid already and draws each row as one Text, as before.
 - **The detail column opens with a two-cell gutter** for a sign: `≈` on an estimated split, `⚠` on an agent near compaction. Legends and each agent's `↑ sent ↓ received` counts start after it, in one column, and the agents' activity after the counts.
 - **Main counts from nothing**; another agent shows no counts until its first request, so teammates in their own pane, whose usage this session can't see, show none.
 - **Each model keeps one slot in every legend**, sized to its name and a right-aligned percentage, so `■ Sonnet` sits in the same column on every row. A row that lacks a model leaves its slot blank. Models drop from the right when the room runs out.
@@ -97,7 +98,7 @@ claude plugin test .              # run the tests
 
 - `tests/helpers.test.ts`: tree, format, palette, estimate (the usage log and saved sessions), reading the spend from the usage endpoint's reply, and settings.
 - `tests/layout.test.ts`: every band state, each kind of plan, a tree cut to fit, and every width from 40 to 160 columns.
-- `tests/band.test.tsx`: the band drawn through the engine on terminal and desktop, its margin and cut tree, `/canopy` and its subcommands, model requests feeding the band, the main model, `/clear` and resume, and the spend request: what it asks and with which login, its timer, a failed read, `/canopy set spend off`, and no request without a login.
+- `tests/band.test.tsx`: the band drawn through the engine on terminal and desktop, held to the monospaced cell off the terminal, its margin and cut tree, `/canopy` and its subcommands, model requests feeding the band, the main model, `/clear` and resume, and the spend request: what it asks and with which login, its timer, a failed read, `/canopy set spend off`, and no request without a login.
 
 For a type-check, use the `tsconfig.json` in the repo once Claude Code has loaded the plugin from this folder (it writes the API types to `.claude-plugin/types/`), then run `tsc -p .`.
 
