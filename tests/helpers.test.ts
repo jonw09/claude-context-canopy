@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { AgentRow } from '../types'
-import { clip, describeTool, money, tokens, until, windowLabel } from '../hooks/format'
+import { atLeast, clip, describeTool, money, tokens, until, windowLabel } from '../hooks/format'
 import { keepSessions, merge, splitFor, weigh } from '../hooks/estimate'
 import { familyOf, healthOf, modelLabel } from '../hooks/palette'
 import { overrideFrom, settingsFrom } from '../hooks/settings'
@@ -49,6 +49,17 @@ describe('tree', () => {
 })
 
 describe('format', () => {
+  test('atLeast reads a Claude Code version, and takes one it cannot read as too old', async () => {
+    expect(atLeast('2.1.331', [2, 1, 331])).toBe(true)
+    expect(atLeast('2.1.332', [2, 1, 331])).toBe(true)
+    expect(atLeast('2.2.0', [2, 1, 331])).toBe(true)
+    expect(atLeast('2.1.331-dev.20261120.t101500.sha1a2b3c4', [2, 1, 331])).toBe(true)
+    expect(atLeast('2.1.330', [2, 1, 331])).toBe(false)
+    expect(atLeast('2.1.309', [2, 1, 331])).toBe(false)
+    expect(atLeast('2.1', [2, 1, 331])).toBe(false)
+    expect(atLeast('unknown', [2, 1, 331])).toBe(false)
+  })
+
   test('tokens', async () => {
     expect(tokens(950)).toBe('950')
     expect(tokens(184_400)).toBe('184k')

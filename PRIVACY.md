@@ -32,6 +32,7 @@ Through Claude Code's plugin API, as the session runs:
 - the list of running agents, with each agent's name, type, description, status, model and token counts
 - the tool each agent calls, with that tool's main argument (a file path, a shell command, a search pattern or web search, the site of a web fetch, or an agent's task description), to show what each agent is doing
 - the apps attached to the session, for `/canopy status`
+- Claude Code's version number, so the band is drawn in a way that version accepts
 
 The agents' activity is held in memory for the session only. It is drawn in the band and never saved or sent anywhere by the plugin.
 

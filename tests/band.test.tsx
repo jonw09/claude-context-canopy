@@ -35,8 +35,12 @@ const canopy = (args: string): CommandRunInput => ({
 })
 
 /** Stands in for the engine beneath the plugin, and starts the session. `usage` may be read afresh on each call. */
-function engine(on: On, { usage = USAGE as SessionUsage | (() => SessionUsage), agents = [] as Partial<AgentInfo>[] } = {}) {
+function engine(
+  on: On,
+  { usage = USAGE as SessionUsage | (() => SessionUsage), agents = [] as Partial<AgentInfo>[], version = '2.1.332' } = {},
+) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.version', () => ({ value: { version, base: version } }))
   on('command.register', () => ({ value: { command: 'canopy' } }))
   on('session.usage', () => ({ value: typeof usage === 'function' ? usage() : usage }))
   on('agent.list', () => ({ value: agents as AgentInfo[] }))
@@ -65,7 +69,7 @@ test('the band shows plan, session and the agent tree on terminal and desktop', 
     expect(await ui.find({ type: 'Text', text: /48%/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /\$1\.12/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Bash: npm test/ })).toBeDefined()
-    // Off the terminal each glyph of the guide has a cell of its own.
+    // Off the terminal each run of a glyph has a cell of its own.
     expect(await ui.find({ type: 'Text', text: /└/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Find callers/ })).toBeDefined()
     await ui.unmount()
@@ -77,6 +81,9 @@ type Drawn = { type: string; props?: Record<string, unknown>; children?: (Drawn 
 
 /** A drawn element's text, its own and its children's. */
 const textOf = (node: Drawn | string): string => (typeof node === 'string' ? node : (node.children ?? []).map(textOf).join(''))
+
+/** Every element of a drawn tree, outermost first. */
+const elementsOf = (node: Drawn | string): Drawn[] => (typeof node === 'string' ? [] : [node, ...(node.children ?? []).flatMap(elementsOf)])
 
 test('off the terminal, the band keeps to the monospaced cell, glyphs past ASCII held to their cells', async ($, on) => {
   const clock = engine(on, { agents: [{ id: 'r', type: 'reviewer', description: 'Review the billing change', status: 'running' }] })
@@ -114,6 +121,22 @@ test('off the terminal, the band keeps to the monospaced cell, glyphs past ASCII
       }
       expect(cells).toBeLessThanOrEqual(BAND.props.bodyColumns)
     }
+    await ui.unmount()
+  }
+})
+
+test('before 2.1.331, whose Box refuses mono, the band draws its text in the monospaced face alone', async ($, on) => {
+  const clock = engine(on, { version: '2.1.330', agents: [{ id: 'r', type: 'reviewer', description: 'Review', status: 'running' }] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(1000)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    const all = elementsOf((await ui.drawn()) as unknown as Drawn)
+    expect(all.filter(el => el.type === 'Box').every(box => box.props?.mono === undefined && box.props?.width === undefined)).toBe(true)
+    // The terminal draws as before; elsewhere every Text asks for the monospaced face, which 2.1.309 takes.
+    expect(all.filter(el => el.type === 'Text').every(text => text.props?.mono === (surface === 'terminal' ? undefined : true))).toBe(true)
+    expect(await ui.find({ type: 'Text', text: /▆{6}/ })).toBeDefined()
     await ui.unmount()
   }
 })

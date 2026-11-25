@@ -3,7 +3,7 @@ import type { EngineInterface, Register, SessionUsage, Timer, TurnUsage } from '
 
 import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides, Spend } from '../types'
 import { type SessionLog, type UsageLog, addTo, hourOf, keepSessions, merge, sentBy, splitFor, weigh } from './estimate'
-import { describeTool } from './format'
+import { atLeast, describeTool } from './format'
 import { type Line, type Seg, buildLines } from './layout'
 import { familyOf } from './palette'
 import { overrideFrom, settingsFrom } from './settings'
@@ -64,6 +64,16 @@ const runs = (text: string): string[] => text.match(/[\x20-\x7e]+|([^])\1*/gu) ?
  * its percentage. Other glyphs draw whole, as a space always follows them.
  */
 const FILL = /^[\u2580-\u259f]+$/
+
+/** The first Claude Code whose Box takes `mono`: an earlier one refuses a tree that names it. */
+const BOX_MONO = [2, 1, 331]
+/** Whether this Claude Code takes `mono` on a Box; until it says, the band asks only what every version takes. */
+let boxMono = false
+
+async function followVersion($: EngineInterface): Promise<void> {
+  const { version, base } = await $.session.version()
+  boxMono = atLeast(base ?? version, BOX_MONO)
+}
 
 /** The band only observes: a failure is kept for `/canopy status` and never reaches Claude's work. */
 const quietly = (work: Promise<unknown>): Promise<unknown> =>
@@ -267,6 +277,7 @@ async function setOverrides($: EngineInterface, change: (now: Overrides) => Over
 
 export const register: Register = on => {
   pending = {}
+  boxMono = false
   spendAskedAt = 0
   spendNote = 'not asked yet'
 
@@ -281,6 +292,7 @@ export const register: Register = on => {
       description: 'Collapse, expand or adjust the Context Canopy band',
       argumentHint: '[collapse|expand|show [width]|status|set <setting> <value>|reset]',
     })
+    await quietly(followVersion($))
     await quietly(followModel($))
     await quietly(measure($, true).then(() => refreshPlanSplit($)))
     await quietly(fetchSpend($))
@@ -380,23 +392,17 @@ export const register: Register = on => {
       ask.lines = lines.length
       if (!lines.length) return next(e)
 
-      // The terminal is a grid of cells already. Elsewhere the band asks for the surface's monospaced
-      // cell, and glyphs past ASCII take a Box of their cells, so a glyph the face lacks can't widen its row.
+      // The terminal is a grid of cells already. Elsewhere text is drawn in the surface's monospaced face, so
+      // spaces pad as wide as letters. From 2.1.331 the band also asks for the face's cell, and glyphs past ASCII
+      // take a Box of their cells, so a glyph the face lacks can't widen its row; an earlier version refuses that.
       const onGrid = e.surface === 'terminal'
-      const style = (s: Seg) => ({ color: s.color, dimColor: s.dim, bold: s.bold })
+      const inCells = !onGrid && boxMono
+      const style = (s: Seg) => ({ color: s.color, dimColor: s.dim, bold: s.bold, mono: onGrid ? undefined : true })
 
       return (
-        <Box flexDirection="column" marginTop={MARGIN} mono={onGrid ? undefined : true}>
+        <Box flexDirection="column" marginTop={MARGIN} mono={inCells ? true : undefined}>
           {lines.map((line, i) =>
-            onGrid ? (
-              <Box key={`line-${i}`}>
-                <Text wrap="truncate">
-                  {line.map(s => (
-                    <Text {...style(s)}>{s.text}</Text>
-                  ))}
-                </Text>
-              </Box>
-            ) : (
+            inCells ? (
               <Box key={`line-${i}`} overflow="hidden">
                 {line.flatMap(s =>
                   runs(s.text).map(run =>
@@ -409,6 +415,14 @@ export const register: Register = on => {
                     ),
                   ),
                 )}
+              </Box>
+            ) : (
+              <Box key={`line-${i}`}>
+                <Text wrap="truncate" mono={onGrid ? undefined : true}>
+                  {line.map(s => (
+                    <Text {...style(s)}>{s.text}</Text>
+                  ))}
+                </Text>
               </Box>
             ),
           )}

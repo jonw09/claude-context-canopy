@@ -71,3 +71,11 @@ export function describeTool(tool: string, input: Readonly<Record<string, unknow
       return tool.startsWith('mcp__') ? tool.split('__').slice(1).join(' ') : tool
   }
 }
+
+/** Whether `version` (`2.1.331`, `2.1.331-dev...`) is `least` or later; one it can't read is not. */
+export function atLeast(version: string, least: readonly number[]): boolean {
+  const parts = version.split(/[.-]/).map(Number)
+  const i = least.findIndex((n, j) => parts[j] !== n)
+
+  return i === -1 || (parts[i] ?? NaN) > least[i]!
+}
