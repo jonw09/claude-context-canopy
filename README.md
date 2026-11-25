@@ -225,6 +225,8 @@ Or to keep the session and plan lines, without the tree:
 | Claude desktop app (Code tab) | ✅ | ✅ |
 | Claude mobile app or web, viewing a cloud session | ❌ the app doesn't draw plugin bands | ✅ |
 
+In the desktop app the band is drawn in the app's code font, so its columns line up as they do in a terminal. From Claude Code 2.1.331 the bars and symbols keep to their columns too, even where that font lacks them. On earlier versions a symbol the font lacks can sit a little out of line.
+
 If the band doesn't appear, run `/canopy status`. It lists which apps are attached and whether any of them asked for the band.
 
 ## Good to know
