@@ -127,11 +127,10 @@ function keyWidth(v: View, narrow: boolean): number {
 const cellsOf = (pct: number): number => Math.max(pct > 0 ? 1 : 0, Math.min(BAR, Math.round((pct / 100) * BAR)))
 
 /**
- * How full something is, a plan window or a context, its fill in the colours of
- * the models that filled it. A bar says what something is made of; the number
- * beside it says whether it needs a look.
+ * A bar `pct` full in the colours of the models that filled it: a plan
+ * window's split, or the session's whole bar of tokens.
  */
-function gauge(pct: number, parts: [Family, number][]): Line {
+function modelBar(pct: number, parts: [Family, number][]): Line {
   const filled = cellsOf(pct)
   const sum = total(parts)
   // Each model's cells by its share, the cells left over going to the largest remainders.
@@ -142,6 +141,13 @@ function gauge(pct: number, parts: [Family, number][]): Line {
   const fill = sum ? cells.map(p => seg('▆'.repeat(p.whole), { color: FAMILY_COLOUR[p.family] })) : [seg('▆'.repeat(filled), { color: FAMILY_COLOUR.other })]
 
   return [...fill, seg('▆'.repeat(BAR - filled), DIM)].filter(s => s.text)
+}
+
+/** An agent's context: how full it is, in its health's colour, green, then amber, then red. */
+function healthBar(pct: number, health: Health): Line {
+  const filled = cellsOf(pct)
+
+  return [seg('▆'.repeat(filled), { color: HEALTH_COLOUR[health] }), seg('▆'.repeat(BAR - filled), DIM)].filter(s => s.text)
 }
 
 /** The models in the session line's legend, the one legend in the band and the key to the plan bars' colours. */
@@ -225,7 +231,7 @@ function windowCells(w: LimitWindow, v: View, width: number): Cells {
 
   return {
     key: [seg(pad(windowLabel(w.kind), width)), seg(resetKey(w.resetsAt, v.now), DIM)],
-    bar: gauge(w.percentUsed, parts),
+    bar: modelBar(w.percentUsed, parts),
     value: healthSeg(percent(w.percentUsed), health),
     detail: w.percentUsed >= 100 ? [gutter(), LIMITED] : parts.length ? [gutter('≈')] : [],
   }
@@ -262,6 +268,8 @@ function sessionLine(v: View, narrow: boolean): Line {
   const cells: Cells = {
     key: [seg(`${tokens(total(parts))} tok`)],
     model: v.usd === null ? undefined : seg(money(v.usd)),
+    // A whole bar split by the models that used the session, the key to the plan bars' colours beside its legend.
+    bar: parts.length ? modelBar(100, parts) : undefined,
     detail: room => legend(parts, legendFamilies(v), room),
   }
 
@@ -299,7 +307,7 @@ function agentLine(r: Row, v: View, narrow: boolean, heading: string): Line {
   const cells: Cells = {
     key: [seg(r.guides, DIM), seg(`${r.glyph} `, r.isIdle ? DIM : colour), seg(r.name, { bold: true })],
     model: seg(narrow ? model.split(' ')[0]! : model, colour),
-    bar: context ? gauge(context.pct, [[family, 1]]) : [seg('·'.repeat(BAR), DIM)],
+    bar: context ? healthBar(context.pct, context.health) : [seg('·'.repeat(BAR), DIM)],
     value: context ? healthSeg(percent(context.pct), context.health) : seg('—', DIM),
     detail: [
       warning.length ? warnGutter() : gutter(),

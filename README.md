@@ -30,8 +30,9 @@ Your session, plan limits and every running agent, in one band above the Claude 
 
 Two rules keep it quick to read:
 
-- **A bar's colours say which models filled it.** A plan window's bar is split by the models that used it, and an agent's context bar is its model's colour: **Fable** violet, **Opus** magenta, **Sonnet** blue, **Haiku** cyan. The session line's `■` shares are the key.
-- **A number's colour says whether it needs a look.** Percentages stay plain while all is well, and turn **amber**, then **red**, as a plan window or an agent's context nears its limit. A calm band has almost no warning colour, so whatever needs you stands out.
+- **Session and plan bars show which models used them**, in model colours: **Fable** violet, **Opus** magenta, **Sonnet** blue, **Haiku** cyan. The session bar is whole, split by the session's tokens, and its `■` shares are the key. Each plan window's bar fills as far as the window is used, split the same way.
+- **Agent bars show health**: an agent's context bar is green, then amber, then red as it nears compacting.
+- **Percentages show whether something needs a look.** They stay plain while all is well, and turn **amber**, then **red**, as a plan window or an agent's context nears its limit.
 
 ## Install
 
@@ -133,7 +134,7 @@ Each row shows:
 │ │                 │           │             │       │             └ shells it has left running in the background
 │ │                 │           │             │       └ tokens sent ↑ and received ↓
 │ │                 │           │             └ context used, of the full window: amber, then red, as it nears compacting
-│ │                 │           └ context bar, in the model's colour
+│ │                 │           └ context bar: green, then amber, then red
 │ │                 └ model, in its colour
 │ └ status: ● running  ◐ waiting  ◌ starting  ○ idle
 └ tree guides showing who started whom
@@ -143,11 +144,11 @@ The tokens are counted the same way as the session line, so all the agents add u
 
 Context colours are tied to the point where Claude Code **auto-compacts** the conversation, not to the raw window size:
 
-| Percentage | When | What to do |
-| --- | --- | --- |
-| Plain | under 60% of the way to auto-compact | nothing |
-| 🟨 Amber | 60% to 89% of the way | long contexts start to lose quality from here |
-| 🟥 Red, `⚠ compacts soon` | 90% of the way or more | consider `/compact`, or let it happen |
+| Bar | Percentage | When | What to do |
+| --- | --- | --- | --- |
+| 🟩 Green | plain | under 60% of the way to auto-compact | nothing |
+| 🟨 Amber | amber | 60% to 89% of the way | long contexts start to lose quality from here |
+| 🟥 Red | red, `⚠ compacts soon` | 90% of the way or more | consider `/compact`, or let it happen |
 
 These are the same 60% and 90% points as the plan line, and [`/canopy set`](#settings) moves them for both.
 

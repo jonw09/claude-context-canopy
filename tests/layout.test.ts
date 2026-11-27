@@ -410,14 +410,26 @@ describe('bars and numbers', () => {
     loops: { r: { model: 'claude-sonnet-5-5', tokens: 120_000 }, x: { model: 'claude-haiku-5-5', tokens: 160_000 } },
   })
 
-  test("a bar's colours say which models filled it; an agent's context is its model's colour", async () => {
+  test("an agent's context bar is its health: green, then amber, then red", async () => {
     const lines = buildLines(v)
     const fill = (pattern: RegExp) => lines.find(line => pattern.test(text(line)))!.filter(s => s.text.startsWith('▆') && !s.dim).map(s => s.color)
-    expect(fill(/● main/)).toEqual(['#e879f9'])
-    expect(fill(/reviewer/)).toEqual(['#60a5fa'])
-    expect(fill(/Explore/)).toEqual(['#22d3ee'])
-    // The session line has no limit, so no bar.
-    expect(text(lines[0])).not.toMatch(/▆|■{2}/)
+    expect(fill(/● main/)).toEqual(['success'])
+    expect(fill(/reviewer/)).toEqual(['warning'])
+    expect(fill(/Explore/)).toEqual(['error'])
+  })
+
+  test("the session's bar is whole, split by the models that used it: the key to the plan bars' colours", async () => {
+    const session = buildLines(base({ sessionTokens: { opus: 55_000, sonnet: 31_000, haiku: 14_000 }, width: 120 }))[0]!
+    // 12 cells: Opus 6.6, Sonnet 3.7 and Haiku 1.7, the two left over to the larger remainders.
+    expect(session.filter(s => s.text.startsWith('▆')).map(s => [s.text.length, s.dim ? 'dim' : s.color])).toEqual([
+      [6, '#e879f9'],
+      [4, '#60a5fa'],
+      [2, '#22d3ee'],
+    ])
+    // Its legend stays, in line with the plan bars, and it has no percentage: a session has no limit.
+    expect(text(session)).toMatch(/^Session +100k tok +\$1\.12 +▆{12} +■ Opus 55%  ■ Sonnet 31%  ■ Haiku 14%$/)
+    // Before any tokens, no bar.
+    expect(text(buildLines(base({ sessionTokens: {} }))[0])).not.toMatch(/▆/)
   })
 
   test('a number is plain while all is well, and amber or red as it nears its limit', async () => {
