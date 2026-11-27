@@ -1,4 +1,4 @@
-import type { AgentRow, Family, FamilyTokens, LimitWindow, LoopLive, MainContext, Spend } from '../types'
+import type { AgentRow, Family, FamilyTokens, LimitWindow, LoopLive, MainContext } from '../types'
 import { SPEND, clip, money, pad, tokens, until, windowLabel } from './format'
 import { FAMILIES, FAMILY_COLOUR, HEALTH_COLOUR, type Health, familyName, familyOf, healthOf, modelLabel } from './palette'
 import type { Settings } from './settings'
@@ -14,10 +14,8 @@ export type View = {
   planSplit: Readonly<Record<string, FamilyTokens>>
   sessionTokens: FamilyTokens
   usd: number | null
-  /** What the account has spent this billing period, from Claude Code's usage endpoint; null when that isn't known. */
-  spend: Spend | null
-  /** Whether Claude has replied and reported no limit: an account with no limit, an API key or a cloud provider. */
-  isUnlimited: boolean
+  /** Whether Claude has replied and reported no limit: an API key, a cloud provider, or a seat billed by use. */
+  noLimitReported: boolean
   main: MainContext & LoopLive
   roster: readonly AgentRow[]
   loops: Readonly<Record<string, LoopLive>>
@@ -43,7 +41,8 @@ const GUTTER = 2
 const FLOW = 14
 const PLAN = 'Plan Limits'
 const MONTH = windowLabel(SPEND)
-const UNLIMITED = 'unlimited'
+/** What a plan row reads where Claude Code reports no limit: an API key, a cloud provider, or a seat billed by use. */
+const NOT_REPORTED = 'not reported'
 const LIMITED: Seg = { text: 'limited', color: HEALTH_COLOUR.bad, bold: true }
 const DIM = { dim: true }
 const HEADING = { dim: true, bold: true }
@@ -61,14 +60,11 @@ const warnGutter = (): Seg => gutter('⚠', { color: HEALTH_COLOUR.bad })
 const label = (text: string): Seg => seg(pad(text, PLAN.length + 2), HEADING)
 const planHealth = (pct: number, v: View): Health => healthOf(pct, 100, v.settings.warn, v.settings.danger)
 const resetKey = (resetsAt: string | undefined, now: number): string => (until(resetsAt, now) ? `↻ ${until(resetsAt, now)}` : '')
-/** The spend row's name: `extra` beside the 5h and 7d windows, as extra usage tops them up, else `month`. */
-const spendName = (v: View): string => (v.limits.length ? 'extra' : MONTH)
-/** No limit and no spend to show, so the plan line says so in a row of its own. */
-const noLimit = (v: View): boolean => v.isUnlimited && !v.limits.length && !v.spend
+/** No limit to show, so the plan line says so in a row of its own. */
+const noLimit = (v: View): boolean => v.noLimitReported && !v.limits.length
 /** Each plan row's name and the key after it. */
 const planKeys = (v: View): [string, string][] => [
   ...v.limits.map((w): [string, string] => [windowLabel(w.kind), resetKey(w.resetsAt, v.now)]),
-  ...(v.spend ? [[spendName(v), resetKey(v.spend.resetsAt, v.now)] as [string, string]] : []),
   ...(noLimit(v) ? [[MONTH, ''] as [string, string]] : []),
 ]
 /** Wide enough for the longest plan row name. */
@@ -180,39 +176,17 @@ function windowCells(w: LimitWindow, v: View, width: number): Cells {
   }
 }
 
-/** A row with no limit to measure it by: `unlimited` where the bar would be, or as its detail when narrow. */
-function unlimitedCells(key: Line, narrow: boolean, amount?: Seg): Cells {
-  return { key, model: amount, bar: [seg(UNLIMITED, DIM)], detail: narrow ? [gutter(), seg(UNLIMITED, DIM)] : [] }
+/** A row with no limit to measure it by: `not reported` where the bar would be, or as its detail when narrow. */
+function unreportedCells(key: Line, narrow: boolean): Cells {
+  return { key, bar: [seg(NOT_REPORTED, DIM)], detail: narrow ? [gutter(), seg(NOT_REPORTED, DIM)] : [] }
 }
 
-/**
- * The account's spend this billing period, laid out as the session's cost is:
- * the amount in the model column, then how much of the limit it is and the
- * limit, or `unlimited` where the bar would be.
- */
-function spendCells(s: Spend, v: View, width: number, narrow: boolean): Cells {
-  const key = [seg(pad(spendName(v), width)), seg(resetKey(s.resetsAt, v.now), DIM)]
-  const amount = seg(money(s.spent, s.currency, !narrow || s.spent < 1000))
-  if (s.limit === null || s.percentUsed === null) return unlimitedCells(key, narrow, amount)
-  const health = planHealth(s.percentUsed, v)
-  const limit = money(s.limit, s.currency, !Number.isInteger(s.limit))
-
-  return {
-    key,
-    model: amount,
-    bar: gauge(s.percentUsed, health),
-    value: healthSeg(percent(s.percentUsed), health),
-    detail: [gutter(), s.percentUsed >= 100 ? LIMITED : seg(`of ${limit}`, DIM)],
-  }
-}
-
-/** The plan's windows, then the month's spend, or `month` alone when no limit is reported. */
+/** The plan's windows, or `month` alone when no limit is reported. */
 function planLines(v: View, narrow: boolean): Line[] {
   const width = nameWidth(v)
   const rows = [
     ...v.limits.map(w => windowCells(w, v, width)),
-    ...(v.spend ? [spendCells(v.spend, v, width, narrow)] : []),
-    ...(noLimit(v) ? [unlimitedCells([seg(pad(MONTH, width))], narrow)] : []),
+    ...(noLimit(v) ? [unreportedCells([seg(pad(MONTH, width))], narrow)] : []),
   ]
   if (!rows.length) return shares(v.sessionTokens).length ? [] : [[label(PLAN), seg('appears after the first reply', DIM)]]
 
@@ -291,18 +265,10 @@ function agentLines(v: View, narrow: boolean, room = Infinity): Line[] {
   return shown.length < rows.length ? [...lines, moreLine(rows.slice(shown.length), v, narrow)] : lines
 }
 
-function collapsedSpend(s: Spend, v: View): Line {
-  const amount = seg(`${spendName(v)} ${money(s.spent, s.currency)} `)
-  if (s.percentUsed === null) return [amount, seg(UNLIMITED, DIM)]
-
-  return [amount, healthSeg(percent(s.percentUsed), planHealth(s.percentUsed, v))]
-}
-
 function collapsedPlan(v: View): Line {
   const items = [
     ...v.limits.map(w => [seg(`${windowLabel(w.kind)} `), healthSeg(percent(w.percentUsed), planHealth(w.percentUsed, v))]),
-    ...(v.spend ? [collapsedSpend(v.spend, v)] : []),
-    ...(noLimit(v) ? [[seg(`${MONTH} `), seg(UNLIMITED, DIM)]] : []),
+    ...(noLimit(v) ? [[seg(`${MONTH} `), seg(NOT_REPORTED, DIM)]] : []),
   ]
   if (!v.settings.showPlan || !items.length) return []
 

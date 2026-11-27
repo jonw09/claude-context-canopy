@@ -1,13 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionUsage, Timer, TurnUsage } from 'claude-code'
 
-import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides, Spend } from '../types'
+import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides } from '../types'
 import { type SessionLog, type UsageLog, addTo, hourOf, keepSessions, merge, sentBy, splitFor, weigh } from './estimate'
-import { describeTool } from './format'
-import { type Line, buildLines } from './layout'
+import { atLeast, describeTool } from './format'
+import { type Line, type Seg, buildLines } from './layout'
 import { familyOf } from './palette'
-import { overrideFrom, settingsFrom } from './settings'
-import { spendFrom } from './spend'
+import { overrideFrom, overridesFrom, settingsFrom } from './settings'
 import { isLive } from './tree'
 
 const MAIN = 'main'
@@ -16,15 +15,11 @@ const MARGIN = 1
 const LOG_KEY = 'usage-log'
 const SESSIONS_KEY = 'sessions'
 const SETTINGS_KEY = 'settings'
-const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|split|spend on|off, or /canopy reset.'
-/** How often the spend is asked for, and the soonest it is asked again after a reply. */
-const SPEND_EVERY = 5 * 60_000
-const SPEND_AFTER_REPLY = 60_000
+const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|split on|off, or /canopy reset.'
 
 const limits = atom({ plugin: 'context-canopy', key: 'limits' } as const, [] as LimitWindow[])
 const main = atom({ plugin: 'context-canopy', key: 'main' } as const, {} as MainContext)
 const usd = atom({ plugin: 'context-canopy', key: 'usd' } as const, null as number | null)
-const spend = atom({ plugin: 'context-canopy', key: 'spend' } as const, null as Spend | null)
 /** The start time of the session the session figures belong to (`$.session.usage().startedAt`). */
 const sessionAt = atom({ plugin: 'context-canopy', key: 'sessionAt' } as const, null as number | null)
 /** Whether any limit has been reported, so a window that lapses unread is not taken for no limit. */
@@ -44,9 +39,33 @@ let pending: UsageLog = {}
 let timers: Timer[] = []
 let asks: Record<string, { count: number; columns: number; lines: number }> = {}
 let lastError = ''
-/** When the spend was last asked for, and what came of it, for `/canopy status`. */
-let spendAskedAt = 0
-let spendNote = 'not asked yet'
+
+/** Text every monospaced face draws a cell to the character: printable ASCII. */
+const PLAIN = /^[\x20-\x7e]+$/
+
+/**
+ * `text` as runs of printable ASCII, and of any other character repeated, such as
+ * a bar's blocks. Layout counts a character's cells by its length, so a run's
+ * length is its width.
+ */
+const runs = (text: string): string[] => text.match(/[\x20-\x7e]+|([^])\1*/gu) ?? []
+
+/**
+ * Block elements, which fill their cells: the bars' `▆`. Drawn wider by a
+ * fallback face, they are cut at the run's last cell, so a bar never reaches
+ * its percentage. Other glyphs draw whole, as a space always follows them.
+ */
+const FILL = /^[\u2580-\u259f]+$/
+
+/** The first Claude Code whose Box takes `mono`: an earlier one refuses a tree that names it. */
+const BOX_MONO = [2, 1, 331]
+/** Whether this Claude Code takes `mono` on a Box; until it says, the band asks only what every version takes. */
+let boxMono = false
+
+async function followVersion($: EngineInterface): Promise<void> {
+  const { version, base } = await $.session.version()
+  boxMono = atLeast(base ?? version, BOX_MONO)
+}
 
 /** The band only observes: a failure is kept for `/canopy status` and never reaches Claude's work. */
 const quietly = (work: Promise<unknown>): Promise<unknown> =>
@@ -137,41 +156,6 @@ async function followModel($: EngineInterface): Promise<void> {
   await setLoop($, MAIN, { model: undefined })
 }
 
-/**
- * Asks Anthropic what the account has spent this billing period, as Claude
- * Code's `/usage` does, at most once in `soonest` ms. The host holds the
- * session's login and sends it to Anthropic alone; the plugin never sees it.
- * Not asked with `/canopy set spend off` or without a claude.ai login (an API
- * key, a gateway or a cloud provider). A failed read keeps the last one.
- */
-async function fetchSpend($: EngineInterface, soonest = 0): Promise<void> {
-  const now = await $.clock.now()
-  if (now - spendAskedAt < soonest) return
-  spendAskedAt = now
-  if (!settingsFrom(await read($, overrides)).fetchSpend) {
-    spendNote = 'off (/canopy set spend on to show it)'
-    await update($, spend, () => null)
-
-    return
-  }
-  const auth = await $.session.authorize()
-  if (auth?.kind !== 'bearer') {
-    spendNote = 'not available without a claude.ai login'
-
-    return
-  }
-  // The one network call: a fixed address and its options, written out here so it can be read at a glance.
-  const reply = await $.http.fetch('https://api.anthropic.com/api/oauth/usage', { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
-  if (!reply.ok) {
-    spendNote = `Anthropic answered ${reply.status}; showing the last reading`
-
-    return
-  }
-  const found = spendFrom(JSON.parse(reply.text), now) ?? null
-  spendNote = found ? 'read from Anthropic' : 'none reported for this account'
-  await update($, spend, () => found)
-}
-
 async function pollAgents($: EngineInterface): Promise<void> {
   const rows = (await $.agent.list()).map(({ id, parentId, type, name, description, status }) => ({ id, parentId, type, name, description, status }))
   if (JSON.stringify(rows) === JSON.stringify(await read($, roster))) return
@@ -180,13 +164,27 @@ async function pollAgents($: EngineInterface): Promise<void> {
   await update($, loops, all => Object.fromEntries(Object.entries(all).filter(([id]) => id === MAIN || live.has(id))))
 }
 
+/** A tool call's input as the record `describeTool` reads; anything else reads as empty. */
+const toRecord = (input: unknown): Record<string, unknown> =>
+  typeof input === 'object' && input !== null && !Array.isArray(input) ? (input as Record<string, unknown>) : {}
+
+/**
+ * An agent's first request names its model before the reply says which model
+ * served it, and brings it into the tree without waiting for the next poll.
+ */
+async function meetAgent($: EngineInterface, id: string, model: string): Promise<void> {
+  if ((await read($, loops))[id]?.model) return
+  await pollAgents($)
+  await setLoop($, id, { model })
+}
+
 async function recordStep($: EngineInterface, id: string, model: string, usage: TurnUsage | null): Promise<void> {
   if (!usage) {
     await setLoop($, id, { model })
 
     return
   }
-  // The limits this response reported are read first, so a plan with limits never shows unlimited.
+  // The limits this response reported are read first, so a plan with limits never reads as having none.
   await followUsage($)
   await update($, hasReplied, () => true)
   const family = familyOf(usage.model)
@@ -217,8 +215,7 @@ async function snapshot($: EngineInterface, width: number, { collapsed, maxRows 
     planSplit: await read($, planSplit),
     sessionTokens: await read($, sessionTokens),
     usd: await read($, usd),
-    spend: await read($, spend),
-    isUnlimited: !windows.length && !(await read($, limitsSeen)) && (await read($, hasReplied)),
+    noLimitReported: !windows.length && !(await read($, limitsSeen)) && (await read($, hasReplied)),
     main: { ...mainContext, ...allLoops[MAIN], model: allLoops[MAIN]?.model ?? mainContext.model },
     roster: await read($, roster),
     loops: allLoops,
@@ -235,7 +232,6 @@ async function statusReport($: EngineInterface): Promise<string> {
   return [
     `Surfaces attached: ${surfaces.join(', ') || 'none'}`,
     `Band asked for by: ${drawn.join('; ') || 'no surface yet'}`,
-    `Spend this month: ${spendNote}${spendAskedAt ? `, ${Math.round(((await $.clock.now()) - spendAskedAt) / 60_000)}m ago` : ''}`,
     `Last error: ${lastError || 'none'}`,
   ].join('\n')
 }
@@ -250,28 +246,26 @@ async function setOverrides($: EngineInterface, change: (now: Overrides) => Over
 
 export const register: Register = on => {
   pending = {}
-  spendAskedAt = 0
-  spendNote = 'not asked yet'
+  boxMono = false
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     log = ((await $.store.get(LOG_KEY)) ?? {}) as UsageLog
     sessions = ((await $.store.get(SESSIONS_KEY)) ?? {}) as SessionLog
-    const saved = ((await $.store.get(SETTINGS_KEY)) ?? {}) as Overrides
+    const saved = overridesFrom(await $.store.get(SETTINGS_KEY))
     await update($, overrides, () => saved)
     await $.command.register({
       name: 'canopy',
       description: 'Collapse, expand or adjust the Context Canopy band',
       argumentHint: '[collapse|expand|show [width]|status|set <setting> <value>|reset]',
     })
+    await quietly(followVersion($))
     await quietly(followModel($))
     await quietly(measure($, true).then(() => refreshPlanSplit($)))
-    await quietly(fetchSpend($))
     for (const timer of timers) timer.cancel()
     timers = [
       $.clock.every(1000, () => void quietly(Promise.all([pollAgents($), followModel($), followUsage($)]))),
       $.clock.every(60_000, () => void quietly(flush($))),
-      $.clock.every(SPEND_EVERY, () => void quietly(fetchSpend($))),
     ]
 
     return started
@@ -298,34 +292,21 @@ export const register: Register = on => {
   })
 
   on('turn.step', async function* ($, e, next) {
+    if (e.agentId) await quietly(meetAgent($, e.agentId, e.model))
     const result = yield* next(e)
-    await quietly(recordStep($, e.agentId ?? MAIN, e.model, result.usage))
+    const id = e.agentId ?? MAIN
+    await quietly(recordStep($, id, e.model, result.usage))
+    // What the reply asks to run next is what the agent is doing. It is read from the reply, so the band hooks no tool call.
+    const last = result.toolUses.at(-1)
+    if (last) await quietly(setLoop($, id, { activity: describeTool(last.name, toRecord(last.input)) }))
 
     return result
   })
 
-  on('tool.call', async ($, e, next) => {
-    await quietly(setLoop($, e.agentId ?? MAIN, { activity: describeTool(String(e.tool), e as unknown as Record<string, unknown>) }))
-
-    return next(e)
-  })
-
   on('turn.complete', async ($, e, next) => {
     await quietly(setLoop($, e.agentId ?? MAIN, { activity: undefined }))
-    // A reply may have spent more; asked at most once a minute however many replies come.
-    if (!e.agentId) await quietly(fetchSpend($, SPEND_AFTER_REPLY))
 
     return next(e)
-  })
-
-  on('agent.spawn', async ($, e, next) => {
-    const spawned = await next(e)
-    if (spawned.agentId) {
-      if (spawned.model) await quietly(setLoop($, spawned.agentId, { model: spawned.model }))
-      await quietly(pollAgents($))
-    }
-
-    return spawned
   })
 
   on('command.run', { command: 'canopy' }, async ($, e) => {
@@ -335,10 +316,7 @@ export const register: Register = on => {
     if (arg === 'set') {
       const change = overrideFrom(size, value)
       if (!change) return { text: USAGE_HINT }
-      const text = await setOverrides($, now => ({ ...now, ...change }))
-      if ('spend' in change) await quietly(fetchSpend($))
-
-      return { text }
+      return { text: await setOverrides($, now => ({ ...now, ...change })) }
     }
     if (arg === 'show') {
       const width = Math.min(Number(size) >= 30 ? Number(size) : e.presentation.columns || 60, 160)
@@ -363,19 +341,40 @@ export const register: Register = on => {
       ask.lines = lines.length
       if (!lines.length) return next(e)
 
+      // The terminal is a grid of cells already. Elsewhere text is drawn in the surface's monospaced face, so
+      // spaces pad as wide as letters. From 2.1.331 the band also asks for the face's cell, and glyphs past ASCII
+      // take a Box of their cells, so a glyph the face lacks can't widen its row; an earlier version refuses that.
+      const onGrid = e.surface === 'terminal'
+      const inCells = !onGrid && boxMono
+      const style = (s: Seg) => ({ color: s.color, dimColor: s.dim, bold: s.bold, mono: onGrid ? undefined : true })
+
       return (
-        <Box flexDirection="column" marginTop={MARGIN}>
-          {lines.map((line, i) => (
-            <Box key={`line-${i}`}>
-              <Text wrap="truncate">
-                {line.map(s => (
-                  <Text color={s.color} dimColor={s.dim} bold={s.bold}>
-                    {s.text}
-                  </Text>
-                ))}
-              </Text>
-            </Box>
-          ))}
+        <Box flexDirection="column" marginTop={MARGIN} mono={inCells ? true : undefined}>
+          {lines.map((line, i) =>
+            inCells ? (
+              <Box key={`line-${i}`} overflow="hidden">
+                {line.flatMap(s =>
+                  runs(s.text).map(run =>
+                    PLAIN.test(run) ? (
+                      <Text {...style(s)}>{run}</Text>
+                    ) : (
+                      <Box width={run.length} flexShrink={0} overflow={FILL.test(run) ? 'hidden' : undefined}>
+                        <Text {...style(s)}>{run}</Text>
+                      </Box>
+                    ),
+                  ),
+                )}
+              </Box>
+            ) : (
+              <Box key={`line-${i}`}>
+                <Text wrap="truncate" mono={onGrid ? undefined : true}>
+                  {line.map(s => (
+                    <Text {...style(s)}>{s.text}</Text>
+                  ))}
+                </Text>
+              </Box>
+            ),
+          )}
         </Box>
       )
     } catch (err) {

@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { AgentRow } from '../types'
-import { clip, describeTool, money, tokens, until, windowLabel } from '../hooks/format'
+import { atLeast, clip, describeTool, money, tokens, until, windowLabel } from '../hooks/format'
 import { keepSessions, merge, splitFor, weigh } from '../hooks/estimate'
 import { familyOf, healthOf, modelLabel } from '../hooks/palette'
-import { overrideFrom, settingsFrom } from '../hooks/settings'
-import { monthEnd, spendFrom } from '../hooks/spend'
+import { overrideFrom, overridesFrom, settingsFrom } from '../hooks/settings'
 import { buildTree, flatten } from '../hooks/tree'
 
 const agent = (id: string, parentId?: string, status = 'running'): AgentRow => ({
@@ -49,6 +48,17 @@ describe('tree', () => {
 })
 
 describe('format', () => {
+  test('atLeast reads a Claude Code version, and takes one it cannot read as too old', async () => {
+    expect(atLeast('2.1.331', [2, 1, 331])).toBe(true)
+    expect(atLeast('2.1.332', [2, 1, 331])).toBe(true)
+    expect(atLeast('2.2.0', [2, 1, 331])).toBe(true)
+    expect(atLeast('2.1.331-dev.20261120.t101500.sha1a2b3c4', [2, 1, 331])).toBe(true)
+    expect(atLeast('2.1.330', [2, 1, 331])).toBe(false)
+    expect(atLeast('2.1.309', [2, 1, 331])).toBe(false)
+    expect(atLeast('2.1', [2, 1, 331])).toBe(false)
+    expect(atLeast('unknown', [2, 1, 331])).toBe(false)
+  })
+
   test('tokens', async () => {
     expect(tokens(950)).toBe('950')
     expect(tokens(184_400)).toBe('184k')
@@ -139,50 +149,12 @@ describe('estimate', () => {
   })
 })
 
-describe('spend', () => {
-  const now = new Date(2026, 9, 23, 12).getTime()
-  const reply = (extra: Record<string, unknown> | null) => ({ five_hour: null, seven_day: null, extra_usage: extra })
-
-  test('reads what the usage endpoint reports, in minor units, with no limit as null', async () => {
-    expect(spendFrom(reply({ is_enabled: true, monthly_limit: null, used_credits: 108_262, utilization: null }), now)).toEqual({
-      spent: 1082.62,
-      limit: null,
-      percentUsed: null,
-      currency: 'USD',
-      resetsAt: new Date(2026, 10, 1).toISOString(),
-    })
-    expect(spendFrom(reply({ is_enabled: true, monthly_limit: 200_000, used_credits: 108_262, utilization: 54.1, currency: 'gbp' }), now)).toMatchObject({
-      limit: 2000,
-      percentUsed: 54.1,
-      currency: 'GBP',
-    })
-  })
-
-  test('works the percentage out when the reply leaves it out', async () => {
-    expect(spendFrom(reply({ is_enabled: true, monthly_limit: 10_000, used_credits: 2_500 }), now)?.percentUsed).toBe(25)
-  })
-
-  test('shows nothing for an account without extra usage, or a reply it cannot read', async () => {
-    expect(spendFrom(reply({ is_enabled: false, monthly_limit: null, used_credits: 0, utilization: null }), now)).toBeUndefined()
-    expect(spendFrom(reply(null), now)).toBeUndefined()
-    expect(spendFrom({ extra_usage: { used_credits: 'lots' } }, now)).toBeUndefined()
-    expect(spendFrom(null, now)).toBeUndefined()
-  })
-
-  test('a limit reached still shows, though extra usage has stopped', async () => {
-    expect(spendFrom(reply({ is_enabled: false, monthly_limit: 5_000, used_credits: 5_000, utilization: 100 }), now)?.percentUsed).toBe(100)
-  })
-
-  test('money', async () => {
+describe('money', () => {
+  test('the session cost, in dollars with the cents', async () => {
+    expect(money(0)).toBe('$0.00')
+    expect(money(4.5)).toBe('$4.50')
     expect(money(1082.62)).toBe('$1,082.62')
-    expect(money(1082.62, 'USD', false)).toBe('$1,083')
-    expect(money(2000, 'GBP', false)).toBe('£2,000')
-    expect(money(12.5, 'EUR')).toBe('€12.50')
-    expect(money(1234567.8, 'AUD')).toBe('AUD 1,234,567.80')
-  })
-
-  test('the month ends on the 1st of the next, across a year', async () => {
-    expect(monthEnd(new Date(2026, 11, 31, 23).getTime())).toBe(new Date(2027, 0, 1).toISOString())
+    expect(money(1234567.8)).toBe('$1,234,567.80')
   })
 })
 
@@ -195,7 +167,6 @@ describe('settings', () => {
       showSession: true,
       showAgents: true,
       estimate: true,
-      fetchSpend: true,
     })
   })
 
@@ -211,8 +182,25 @@ describe('settings', () => {
   test('/canopy set reads percentages and switches, and nothing else', async () => {
     expect(overrideFrom('amber', '70')).toEqual({ amber: 70 })
     expect(overrideFrom('split', 'off')).toEqual({ split: false })
-    expect(overrideFrom('spend', 'off')).toEqual({ spend: false })
+    // The spend switch went with the spend request.
+    expect(overrideFrom('spend', 'off')).toBeUndefined()
     expect(overrideFrom('amber', 'lots')).toBeUndefined()
     expect(overrideFrom('colour', 'on')).toBeUndefined()
+  })
+
+  test('saved settings keep what this version has, and drop the rest', async () => {
+    expect(overridesFrom({ amber: 70, red: 95, plan: false, session: true, agents: false, split: false })).toEqual({
+      amber: 70,
+      red: 95,
+      plan: false,
+      session: true,
+      agents: false,
+      split: false,
+    })
+    // An earlier version saved `spend`; a value of the wrong kind is dropped too.
+    expect(overridesFrom({ spend: false, amber: '70', plan: 'off' })).toEqual({})
+    expect(overridesFrom(undefined)).toEqual({})
+    expect(overridesFrom(null)).toEqual({})
+    expect(overridesFrom('settings')).toEqual({})
   })
 })

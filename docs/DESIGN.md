@@ -12,28 +12,27 @@ $.session.usage() every second      sessionAt              │
 turn.step (every model request) ─→  sessionTokens,         │
                                     loops[agent].tokens,   ├─→ layout.ts ─→ ui.render(AbovePrompt)
                                     sent, received         │
-tool.call / turn.start / complete ─→ loops[agent].activity │   buildLines()    └─ /canopy show (text)
+turn.step's toolUses, turn.start ─→ loops[agent].activity  │   buildLines()    └─ /canopy show (text)
+  and turn.complete                                        │
 $.agent.list() every second     ─→  roster                 │
-$.session.model() every second  ─→  main.model             │
-usage endpoint, $.http.fetch    ─→  spend                 ─┘
+$.session.model() every second  ─→  main.model            ─┘
 turn.step ─→ hourly log ($.store) ─→ planSplit (≈ estimate)
 session figures ─→ sessions ($.store) ─→ resume
 ```
 
 | File | Job |
 | --- | --- |
-| `hooks/register.tsx` | Event collectors, the spend request, the `/canopy` command and the `ui.render` hook. The only file that talks to the engine. |
+| `hooks/register.tsx` | Event collectors, the `/canopy` command and the `ui.render` hook. The only file that talks to the engine. |
 | `hooks/layout.ts` | Turns state into coloured lines for a given width. Pure. |
 | `hooks/tree.ts` | Nests the flat agent list by `parentId`, drops finished agents, lifts orphans. Pure. |
 | `hooks/format.ts` | Token counts, money, durations, clipping, tool descriptions. Pure. |
 | `hooks/palette.ts` | Model families, labels and colours; health against the compaction point. Pure. |
 | `hooks/estimate.ts` | Token weighting, the hourly per-model log and each window's split, and the saved sessions. Pure. |
-| `hooks/spend.ts` | Reads the spend out of the usage endpoint's reply, and when the month ends. Pure. |
-| `hooks/settings.ts` | `/canopy set` overrides to settings, with red kept above amber. Pure. |
+| `hooks/settings.ts` | `/canopy set` overrides to settings, with red kept above amber, and the saved settings read back. Pure. |
 | `types/index.d.ts` | The `$.state` contract. |
 | `scripts/render-images.mjs` | Redraws the README screenshots from `layout.ts`. Not part of the plugin. |
 
-Every hook observes and calls `next(e)` unchanged. Work after `next` is wrapped so a failure in the band never affects a tool call, an agent spawn or a model request.
+Every hook observes and calls `next(e)` unchanged, apart from `command.run` for `/canopy`, which it answers, and `ui.render` for `AbovePrompt`, which draws the band. Work around `next` is wrapped so a failure in the band never affects a model request. The band hooks no tool call and no agent spawn, makes no network request and reads no credential (see [Plugin directory](#plugin-directory)).
 
 ## Where the data comes from
 
@@ -43,15 +42,15 @@ Checked against the Claude Code 2.1.309 plugin API.
 | --- | --- | --- |
 | Plan windows | `$.session.usage().rateLimits`, pushed by `session.measure` | `{ kind, percentUsed, resetsAt }`. Kinds: `five_hour`, `seven_day`, a gateway's `spend_limit`. Empty off a subscription. |
 | Session cost | `$.session.usage().cost.usd` | Total only, as `/cost` has it, at API prices. |
-| The month's spend | `GET https://api.anthropic.com/api/oauth/usage`, through `$.http.fetch` with the handle `$.session.authorize()` gives | The request behind Claude Code's `/usage`. Its `extra_usage` holds `used_credits` and `monthly_limit` (minor units of `currency`, the limit null when there is none), `utilization` (0 to 100) and `is_enabled`. The host adds the login itself, for Anthropic's hosts only, so the plugin never holds it. A `bearer` handle only: an API key, gateway or cloud provider gets none. Asked at the start, every five minutes, and after a main turn ends at most once a minute; a failed read keeps the last one. Claude Code resets it on the 1st of next month, local time, and so does the band. `/canopy set spend off` stops it. |
 | Session start | `$.session.usage().startedAt` | Keys the session's figures. Claude Code restores a resumed session's cost and resets it on `/clear`, which starts a new session; the band does the same with its tokens, saving each session's tokens in `$.store` (`sessions`, 40 days) and picking them up again on a resume. Main's sent and received counts start over. `/clear` raises no measure event, so the one-second poll also reads `$.session.usage()` (free) and measures again when the start time or cost moves. |
 | Main context | `$.session.usage().context` | `tokens`, `window`. The compaction point comes from `breakdown: 'summary'` (a local estimate, no API calls), asked for again only when the window changes. |
 | Per-request model and tokens | `turn.step` result `usage`, with `e.agentId` | Fires for main and every subagent. Each agent's sent (input, cache writes, cache reads at a tenth) and received (output) add up across its requests. |
 | Band height | `ui.render` `props.maxRows` | The rows the band may take. Past it the engine scrolls the band, so the plugin cuts the tree itself first. |
 | Agent tree | `$.agent.list()` | `id`, `parentId`, `type`, `name`, `description`, `status`. |
-| Agent's model | `turn.step` and `agent.spawn` results | Not on the agent list. |
+| Agent's model | `turn.step`: the model it asks for, then the model that served it | Not on the agent list. An agent's first request also brings it into the tree without waiting for the next poll. |
+| Claude Code's version | `$.session.version()`, at the start | Whether the engine takes `mono` on a Box (2.1.331 on). An earlier engine refuses a tree that names a prop it doesn't know, so the band only asks for it once the version says it may. |
 | Main model | `$.session.model()`, at the start and each second | So the main row names its model before the first request, and follows a `/model` switch. Between switches, the model of the last request stands, so a fallback shows. |
-| What an agent is doing | `tool.call` (tool name and input at the top level of `e`) | Cleared on `turn.complete`. |
+| What an agent is doing | `turn.step` result `toolUses`: the last tool call the reply asks for, its name and input | Read from the reply rather than by hooking `tool.call`, so the band never sits in a tool call's path. Cleared on `turn.complete`. |
 
 ### What the API doesn't give, and what the plugin does instead
 
@@ -61,9 +60,8 @@ Checked against the Claude Code 2.1.309 plugin API.
 - **No subagent window size.** 200k by default, 1M for `[1m]` models, or the main session's window when the model matches. Each agent's compaction point is its window scaled by the main session's compaction ratio.
 - **Teammates in their own terminal pane** run no loop in this process: status only, `—` for context.
 - **No plan name.** Claude Code doesn't tell plugins which plan you're on, so the row is headed **Plan Limits**. `$.session.identity()` gives the organisation's plan, but only to mods that organisation-managed settings install, and the directory reviews it as a credential read, so the plugin doesn't call it. The login file on disk was left alone too: it is undocumented, varies by platform and sits beside credentials.
-- **No spend in the plugin API.** `$.session.usage()` has no figure for what an account has spent this month. A gateway's `spend_limit` window comes as a percentage (past 100 once exceeded) and a reset time only. So the plugin makes the request `/usage` makes, as above. It's not a published API, so `spendFrom` reads it defensively: anything it can't read shows no spend rather than a wrong one. An earlier version added up this machine's saved sessions instead, which on a new install or a fresh container came to the session alone, and never saw other devices.
-- **The spend row.** Laid out as the session line is: the amount in the model column, then a gauge and percentage of the limit, and `of $2,000` as the detail; with no limit, `unlimited` where the gauge would be. Headed `month`, as Claude Code calls it, or `extra` beside the 5-hour and 7-day windows, where it is extra usage on top of them.
-- **No word of an unlimited seat without a login.** With no spend read and no window reported (an API key, a cloud provider, a gateway with no limit, or the request failing), once Claude has replied, and with no window seen this session (a window can lapse unread), the plan line shows `month` reading `unlimited` alone. `$.session.identity()` would tell these apart, but only to mods that an organisation's managed settings install.
+- **No spend in the plugin API.** `$.session.usage()` has no figure for what an account has spent this month. A gateway's `spend_limit` window comes as a percentage (past 100 once exceeded) and a reset time only, and the band draws it as it draws any window. Versions 0.2.0 to 0.3.2 read the month's spend with the request `/usage` makes (`$.session.authorize()` with `$.http.fetch`); that was removed because the plugin directory blocks a mod that reads a login and sends data out (see [Plugin directory](#plugin-directory)).
+- **No limit reported.** With no window reported (Enterprise and other seats billed by use, an API key, a cloud provider, a gateway with no limit), once Claude has replied, and with no window seen this session (a window can lapse unread), the plan line shows `month` reading `not reported` alone. It doesn't say `unlimited`, as an Enterprise seat may well have a spend limit the plugin can't see. `$.session.identity()` would tell these apart, but only to mods that an organisation's managed settings install.
 - **No session limit.** A session has no limit of its own, so the band shows its cost alone, on the session line, for every plan.
 - **The mobile app on a cloud session attaches no drawing surface.** `$.session.surfaces()` is empty there, so nothing a plugin draws appears. `/canopy show` prints the band as text for that case.
 
@@ -72,17 +70,18 @@ Checked against the Claude Code 2.1.309 plugin API.
 - **Always shown.** Plan and session usage matter even with no agents running.
 - **Session, Plan, then Agents**, one blank row above the band (counted against `maxRows`). The collapsed line keeps the same order.
 - **Two colour sets that never overlap.** Model colours (hex, chosen to read on light and dark terminals): Fable `#a78bfa`, Opus `#e879f9`, Sonnet `#60a5fa`, Haiku `#22d3ee`, other `#9ca3af`. Health uses the theme keys `success`, `warning` and `error`, so it follows the user's theme, colour-blind ones included.
-- **A bar always means how full something is.** Plan windows, the spend limit and each agent's context are gauges, coloured by health alone, with the percentage beside them in the same colour. Model colours never fill a bar: they mark model names and the `■` shares in the legends. The session line has no limit, so it has no bar: an earlier strip of model shares there looked like a gauge and repeated its own legend. The plan windows used to be filled in model colours, which made a window's bar and an agent's context bar mean different things in one column.
+- **A bar always means how full something is.** Plan windows and each agent's context are gauges, coloured by health alone, with the percentage beside them in the same colour. Model colours never fill a bar: they mark model names and the `■` shares in the legends. The session line has no limit, so it has no bar: an earlier strip of model shares there looked like a gauge and repeated its own legend. The plan windows used to be filled in model colours, which made a window's bar and an agent's context bar mean different things in one column.
 - **Health is tied to the auto-compact point.** Amber from 60% of the way there, red from 90%. Both can be changed with `/canopy set`. The percentage printed is of the full window, to match `/context`.
 - **Plan percentages** use the same 60% and 90% points against the window's 100%.
 - **Any figure above nothing fills a cell** of its bar, so a month 2% used still shows.
 - **Finished agents drop off** at once. Their running children move up to the nearest live ancestor.
 - **"Waiting on N agents"** counts direct helpers only. Deeper ones show under the agent that started them.
-- **One grid for every row.** Label, key, model, bar, percentage, then detail (legend or activity), so bars, percentages and details line up down the band. Money goes in the model column, so the session's cost and the month's spend sit one above the other. The key column widens for a long window name or reset time, and from 120 columns for long agent names, up to 30 columns (half as much again). It always keeps a blank column before the model.
+- **One grid for every row.** Label, key, model, bar, percentage, then detail (legend or activity), so bars, percentages and details line up down the band. Money goes in the model column. The key column widens for a long window name or reset time, and from 120 columns for long agent names, up to 30 columns (half as much again). It always keeps a blank column before the model.
+- **The grid holds off the terminal too.** The desktop app, VS Code and the phones draw text in a proportional face, where spaces are narrow and a glyph the face lacks comes from a fallback of its own width, so the band's padding drifted and its bars ran long. There every Text asks for the surface's monospaced face (`mono`), so spaces pad as wide as letters. From Claude Code 2.1.331, whose Box takes `mono` too, the band also asks for the face's cell, and each run of glyphs past ASCII (`▆`, `■`, `↻`, `●`, the tree's guides) goes in a Box as wide as its cells. A bar's blocks are cut at their last cell so a wide fallback never reaches the percentage; other glyphs draw whole, as a space always follows them. Before 2.1.331 a Box that names `mono` is refused, and the band would not draw at all, so it keeps to Text `mono` there. The terminal is a grid already and draws each row as one Text, as before.
 - **The detail column opens with a two-cell gutter** for a sign: `≈` on an estimated split, `⚠` on an agent near compaction. Legends and each agent's `↑ sent ↓ received` counts start after it, in one column, and the agents' activity after the counts.
 - **Main counts from nothing**; another agent shows no counts until its first request, so teammates in their own pane, whose usage this session can't see, show none.
 - **Each model keeps one slot in every legend**, sized to its name and a right-aligned percentage, so `■ Sonnet` sits in the same column on every row. A row that lacks a model leaves its slot blank. Models drop from the right when the room runs out.
-- **Narrow layouts** (under 72 columns) drop the bars and token counts, shorten model names, and drop the pence from $1,000 so an amount fits its column. Legends and activity take what room is left, item by item.
+- **Narrow layouts** (under 72 columns) drop the bars and token counts and shorten model names. Legends and activity take what room is left, item by item.
 - **Tall trees are cut to fit** `maxRows`, less the rows the margin, session and plan take, keeping main. The last row says how many agents it hides, and how many of those are near compacting. `/canopy show` has no height, so it prints the whole tree.
 
 ## Testing
@@ -95,9 +94,9 @@ claude plugin validate --strict . # check the manifest and hooks module
 claude plugin test .              # run the tests
 ```
 
-- `tests/helpers.test.ts`: tree, format, palette, estimate (the usage log and saved sessions), reading the spend from the usage endpoint's reply, and settings.
+- `tests/helpers.test.ts`: tree, format, palette, estimate (the usage log and saved sessions), money, and settings, including dropping a setting an earlier version saved.
 - `tests/layout.test.ts`: every band state, each kind of plan, a tree cut to fit, and every width from 40 to 160 columns.
-- `tests/band.test.tsx`: the band drawn through the engine on terminal and desktop, its margin and cut tree, `/canopy` and its subcommands, model requests feeding the band, the main model, `/clear` and resume, and the spend request: what it asks and with which login, its timer, a failed read, `/canopy set spend off`, and no request without a login.
+- `tests/band.test.tsx`: the band drawn through the engine on terminal and desktop, held to the monospaced cell off the terminal (and to the monospaced face alone before 2.1.331), its margin and cut tree, `/canopy` and its subcommands, model requests feeding the band, each agent's activity read from its reply, an agent's first request bringing it into the tree, the main model, `/clear` and resume, and that nothing is fetched and no login is asked for.
 
 For a type-check, use the `tsconfig.json` in the repo once Claude Code has loaded the plugin from this folder (it writes the API types to `.claude-plugin/types/`), then run `tsc -p .`.
 
@@ -105,7 +104,7 @@ The README screenshots in `docs/images/` are drawn from `layout.ts`'s output by 
 
 ### Not yet covered
 
-- A live run on Pro, Max, a gateway spend limit, Enterprise with and without a spend limit, and an API key, and in the desktop app. The spend request in particular was built from the shape Claude Code 2.1.309 reads, not a live reply.
+- A live run on Pro, Max, a gateway spend limit, Enterprise and an API key, and in the desktop app.
 - Saving the usage log and session figures across sessions (`flush` on the timer, at session end and on a change of session). Up to a minute of either can be lost if Claude Code exits abruptly.
 
 ## Releasing
@@ -148,4 +147,11 @@ END_COMMIT_OVERRIDE
 
 To list it in Anthropic's plugin directory, submit this repository (not the `claude-plugins` catalogue, whose entry points here) at [claude.ai/directory/manage](https://claude.ai/directory/manage). The portal follows `main`, so new commits are scanned without a new submission. It takes the plugin's icon only on the first submission.
 
-Some findings are expected and go to a reviewer rather than blocking: `scripts/render-images.mjs` names the screenshots it writes, and `.github/workflows/release.yml` reads the Release Please token. Neither runs when someone uses the plugin. The spend request (`$.session.authorize()` with `$.http.fetch`) may be reviewed too: it goes to Anthropic alone, the host holds the login, and [PRIVACY.md](../PRIVACY.md) and the manifest's `privacyPolicyUrl` say so.
+What its scan blocks a mod for, and how the plugin keeps clear of it:
+
+- **Reading a credential, or sending data out.** The plugin makes no network request (`$.http.fetch`) and never asks for the login (`$.session.authorize()`). The month's spend went for this reason.
+- **Fetching from the network and running commands or tools**, which together are what a mod would need to take commands from a server. It fetches nothing, and runs no process, tool or model. It hooks no `tool.call` or `agent.spawn` either: each agent's activity comes from the tool calls in its reply, read at `turn.step`.
+- **Hooking an event that settings, instructions, other hooks or tool descriptions pass through** (`agent.spawn`). Not hooked.
+- **Including a mod at all.** The whole plugin is a mod: the band can only be drawn by one. That finding can't be fixed in code, so it goes to an appeal.
+
+Some findings are expected and go to a reviewer rather than blocking: `scripts/render-images.mjs` names the screenshots it writes, and `.github/workflows/release.yml` reads the Release Please token. Neither runs when someone uses the plugin. `plugin.json`'s `documentationUrl`, `supportUrl` and `privacyPolicyUrl` are listing fields only the directory reads, and `icon` is the directory's too, so the scan's notes on them need nothing.

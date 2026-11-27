@@ -54,8 +54,7 @@ const view = patch => ({
   planSplit: { five_hour: { opus: 58, sonnet: 27, haiku: 15 }, seven_day: { opus: 64, sonnet: 24, haiku: 12 } },
   sessionTokens: { opus: 337_000, sonnet: 190_000, haiku: 85_000 },
   usd: 4.87,
-  spend: null,
-  isUnlimited: false,
+  noLimitReported: false,
   main: { ...MAIN, tokens: 74_000, sent: 318_600, received: 18_400, activity: undefined },
   roster: [],
   loops: {},
@@ -100,22 +99,16 @@ const CROWD = {
     p: { model: 'claude-haiku-5-5', tokens: 22_000, sent: 19_800, received: 1_300, activity: 'Bash: npm run bench' },
     l: { model: 'claude-haiku-5-5', tokens: 12_000, sent: 11_400, received: 900, activity: 'Bash: npm run lint' },
   },
+  // Sent and received add up to these: 337k Opus (main) and 105.5k (migration-planner), 371.9k Sonnet, 118.4k Haiku.
+  sessionTokens: { opus: 442_500, sonnet: 371_900, haiku: 118_400 },
   // The band's own rows, less the blank row above it, as the plugin counts them.
   maxRows: 11,
 }
 
-// What the usage endpoint reports for the month: spent, and the limit, or none.
-const MONTH = { spent: 1082.62, currency: 'USD', resetsAt: '2026-11-01T00:00:00Z' }
+// No window reported.
+const ORGANISATION = { limits: [], planSplit: {}, usd: 18.4 }
 
-const ORGANISATION = {
-  limits: [],
-  planSplit: {},
-  sessionTokens: { opus: 210_000, sonnet: 80_000 },
-  usd: 18.4,
-  main: { ...MAIN, tokens: 52_000, sent: 196_000, received: 14_000, activity: 'Read infra/main.tf' },
-}
-
-// The README shows the first four at the top, in this order, and the rest further down.
+// The README shows the first three at the top, in this order, and the rest further down.
 const SCREENS = [
   {
     file: 'initial.png',
@@ -125,14 +118,9 @@ const SCREENS = [
   },
   { file: 'band.png', title: 'Pro or Max, with more agents than the band has room for', v: view(CROWD) },
   {
-    file: 'enterprise.png',
-    title: 'Enterprise with a spend limit',
-    v: view({ ...ORGANISATION, ...CROWD, spend: { ...MONTH, limit: 2000, percentUsed: 54.1 } }),
-  },
-  {
-    file: 'unlimited.png',
-    title: 'Enterprise with no spend limit',
-    v: view({ ...ORGANISATION, ...CROWD, spend: { ...MONTH, limit: null, percentUsed: null } }),
+    file: 'no-limit.png',
+    title: 'Enterprise, an API key or a cloud provider: no limit reported',
+    v: view({ ...ORGANISATION, ...CROWD, noLimitReported: true }),
   },
   {
     file: 'limit.png',
@@ -144,16 +132,6 @@ const SCREENS = [
       ],
       main: { ...MAIN, tokens: 151_000, sent: 318_600, received: 18_400, activity: 'Bash: npm test' },
     }),
-  },
-  {
-    file: 'extra.png',
-    title: 'Pro or Max with extra usage turned on',
-    v: view({ ...TEAM, spend: { ...MONTH, spent: 12.3, limit: 50, percentUsed: 24.6 } }),
-  },
-  {
-    file: 'no-limit.png',
-    title: 'An API key: no limit reported',
-    v: view({ ...ORGANISATION, ...TEAM, isUnlimited: true }),
   },
   { file: 'collapsed.png', title: 'Collapsed with /canopy', v: view({ ...TEAM, isCollapsed: true }) },
   { file: 'narrow.png', title: 'A narrow terminal (60 columns)', v: view({ ...TEAM, width: 60 }) },
