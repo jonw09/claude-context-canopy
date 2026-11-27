@@ -34,7 +34,7 @@ describe('band layout', () => {
     const lines = buildLines(base()).map(text)
     expect(lines).toHaveLength(4)
     expect(lines[0]).toMatch(/^Session +184k tok +\$1\.12 /)
-    expect(lines[1]).toMatch(/^Plan Limits +5h +↻ 2h14m +▆+ +48% +≈ ■ Opus 90% +■ Haiku 10%/)
+    expect(lines[1]).toMatch(/^Plan Limits +5h +↻ 2h14m +▆+ +48% +≈ *$/)
     expect(lines[2]).toMatch(/^ +7d +↻ 4d06h +▆+ +21%/)
     expect(lines[3]).toMatch(/^Agents +● main +Opus 5\.5 .*41% +↑0 +↓0 +ready$/)
   })
@@ -115,31 +115,37 @@ describe('band layout', () => {
     // A gutter holds `≈`; legends and each agent's sent and received counts start two columns on, together,
     // and the agents' activity after those, together too.
     const gutter = columns(/≈/)[0]!
-    for (const line of lines) expect(line.slice(gutter, gutter + 3)).toMatch(/^(≈ |  )[■↑ ]/)
+    for (const line of lines) expect(line.slice(gutter, gutter + 3)).toMatch(/^(≈ *$|  [■↑ ])/)
     expect(find(lines, /reviewer/)).toMatch(/↑1\.25M ↓31k +Read src\/x\.ts$/)
     expect(new Set(columns(/waiting|Read /)).size).toBe(1)
   })
 
-  test('each model keeps its own slot down every legend, whatever its percentage', async () => {
-    const lines = buildLines(
-      base({
-        planSplit: { five_hour: { opus: 95, sonnet: 5 }, seven_day: { opus: 60, sonnet: 30, haiku: 10 } },
-        sessionTokens: { sonnet: 50_000, haiku: 50_000 },
-        width: 140,
-      }),
-    ).map(text)
-    for (const name of ['Opus', 'Sonnet', 'Haiku']) {
-      expect(new Set(lines.map(line => line.indexOf(`■ ${name}`)).filter(i => i >= 0)).size).toBe(1)
+  test("a plan bar is split by the models that used it, in the session legend's colours, each cell to one model", async () => {
+    const lines = buildLines(base({ planSplit: { five_hour: { opus: 90, haiku: 10 }, seven_day: { opus: 50, sonnet: 30, haiku: 20 } } }))
+    const bar = (i: number) => lines[i]!.filter(s => s.text.startsWith('▆')).map(s => [s.text.length, s.dim ? 'dim' : s.color])
+    // 48% of 12 cells is 6: Opus 5.4 and Haiku 0.6, rounded by the larger remainder.
+    expect(bar(1)).toEqual([[5, '#e879f9'], [1, '#22d3ee'], [6, 'dim']])
+    // 21% is 3 cells: Opus 1.5, Sonnet 0.9 and Haiku 0.6, so one each as the remainders fall.
+    expect(bar(2)).toEqual([[1, '#e879f9'], [1, '#60a5fa'], [1, '#22d3ee'], [9, 'dim']])
+    // The session line's legend is the key to those colours.
+    expect(text(lines[0])).toMatch(/■ Opus 92% +■ Haiku  8%/)
+  })
+
+  test('with no split to go by, a plan bar is one neutral fill and has no ≈', async () => {
+    for (const v of [base({ planSplit: {} }), base({ settings: settingsFrom({ split: false }) })]) {
+      const plan = buildLines(v)[1]!
+      expect(plan.filter(s => s.text.startsWith('▆') && !s.dim).map(s => s.color)).toEqual(['#9ca3af'])
+      expect(text(plan)).not.toMatch(/≈/)
     }
-    expect(find(lines, /^Plan Limits/)).toMatch(/■ Opus 95% +■ Sonnet  5%/)
-    // The session used no Opus, so its slot is left blank.
-    expect(find(lines, /^Session/)).toMatch(/ {3}■ Sonnet 50% +■ Haiku 50%/)
   })
 
   test('a legend shows every model that fits, the last without a gap after it', async () => {
-    const v = base({ width: 104, planSplit: { five_hour: { opus: 58, sonnet: 27, haiku: 15 }, seven_day: {} }, sessionTokens: { opus: 1 } })
-    expect(find(buildLines(v).map(text), /^Plan Limits/)).toMatch(/■ Sonnet 27%  ■ Haiku 15%$/)
-    expect(find(buildLines({ ...v, width: 103 }).map(text), /^Plan Limits/)).toMatch(/■ Sonnet 27%$/)
+    const v = base({ width: 0, sessionTokens: { opus: 58, sonnet: 27, haiku: 15 } })
+    const session = (width: number) => find(buildLines({ ...v, width }).map(text), /^Session/)
+    const all = [...Array(161).keys()].find(width => /Haiku 15%$/.test(session(width)))!
+    expect(session(all)).toMatch(/■ Opus 58%  ■ Sonnet 27%  ■ Haiku 15%$/)
+    expect(session(all).length).toBe(all)
+    expect(session(all - 1)).toMatch(/■ Sonnet 27%$/)
   })
 
   test('collapsed is one line, in the band order, and still flags agents that need compacting', async () => {
@@ -246,41 +252,195 @@ describe('accounts with no 5-hour or 7-day window', () => {
     const lines = buildLines(
       account({ limits: [{ kind: 'spend_limit', percentUsed: 64, resetsAt: '2026-10-30T10:00:00Z' }], planSplit: { spend_limit: { opus: 70, sonnet: 30 } } }),
     ).map(text)
-    expect(lines[1]).toMatch(/^Plan Limits +month +↻ 9d00h +▆+ +64% +≈ ■ Opus 70% +■ Sonnet 30%$/)
+    expect(lines[1]).toMatch(/^Plan Limits +month +↻ 9d00h +▆+ +64% +≈ *$/)
   })
 
-  test('with no limit reported, the month says so alone', async () => {
+  test('with no limit reported and no plan named, the plan line says not reported alone', async () => {
     const lines = buildLines(account({ noLimitReported: true })).map(text)
-    expect(find(lines, /^Plan Limits/)).toMatch(/^Plan Limits +month +not reported *$/)
-    expect(find(lines, /^Plan Limits/).indexOf('not reported')).toBe(find(lines, /^Agents/).search(/▆/))
+    expect(find(lines, /^Plan Limits/)).toMatch(/^Plan Limits  not reported *$/)
     expect(buildLines(base({ noLimitReported: true })).map(text).join('\n')).not.toMatch(/not reported/)
+  })
+
+  test('the plan the welcome logo names says where its spend is shown, or that it has no plan limit', async () => {
+    const plan = (line: string): string => find(buildLines(account({ noLimitReported: true, plan: line })).map(text), /^Plan Limits/)
+    expect(plan('Claude Enterprise')).toMatch(/^Plan Limits  Enterprise +see \/usage *$/)
+    expect(plan('Claude Team')).toMatch(/^Plan Limits  Team +see \/usage *$/)
+    expect(plan('API Usage Billing')).toMatch(/^Plan Limits  API key +no plan limit *$/)
+    expect(plan('Amazon Bedrock')).toMatch(/^Plan Limits  Amazon Bedrock +no plan limit *$/)
+    expect(plan('Cloud gateway')).toMatch(/^Plan Limits  Cloud gateway +not reported *$/)
+    // A login whose plan the logo doesn't know says no more than no line at all.
+    expect(plan('Claude API')).toMatch(/^Plan Limits  not reported *$/)
+    // The note sits where a bar would be.
+    const lines = buildLines(account({ noLimitReported: true, plan: 'Claude Enterprise' })).map(text)
+    expect(find(lines, /^Plan Limits/).indexOf('see /usage')).toBe(find(lines, /^Agents/).search(/▆/))
+  })
+
+  test('a long provider name is cut so the grid keeps its columns', async () => {
+    const named = buildLines(account({ noLimitReported: true, plan: 'Claude Platform on Google Cloud' })).map(text)
+    const plain = buildLines(account({ noLimitReported: true })).map(text)
+    expect(find(named, /^Plan Limits/)).toMatch(/^Plan Limits  Platform on Goog… +no plan limit *$/)
+    expect(find(named, /^Agents/)).toBe(find(plain, /^Agents/))
+  })
+
+  test('with windows reported, the plan named changes nothing', async () => {
+    expect(buildLines(base({ plan: 'Claude Max' })).map(text)).toEqual(buildLines(base()).map(text))
   })
 
   test('before a reply, with nothing reported, there is no plan line', async () => {
     expect(buildLines(account()).map(text).join('\n')).not.toMatch(/Plan Limits|not reported/)
+    expect(buildLines(account({ plan: 'Claude Enterprise' })).map(text).join('\n')).not.toMatch(/Plan Limits|Enterprise/)
   })
 
-  test('collapsed, the month says not reported after the session', async () => {
-    expect(text(buildLines(account({ noLimitReported: true, isCollapsed: true }))[0])).toMatch(/^Session 290k tok \$18\.40 +Plan Limits month not reported +Agents/)
+  test('collapsed, the plan line follows the session', async () => {
+    expect(text(buildLines(account({ noLimitReported: true, isCollapsed: true }))[0])).toMatch(/^Session 290k tok \$18\.40 +Plan Limits not reported +Agents/)
+    expect(text(buildLines(account({ noLimitReported: true, plan: 'Claude Enterprise', isCollapsed: true }))[0])).toMatch(
+      /^Session 290k tok \$18\.40 +Plan Limits Enterprise see \/usage +Agents/,
+    )
   })
 
-  test('narrow, not reported moves to the detail column and every line fits', async () => {
-    expect(find(buildLines(account({ noLimitReported: true, width: 60 })).map(text), /^Plan Limits/)).toMatch(/^Plan Limits +month +not reported$/)
-    for (const width of [40, 60, 72, 100, 160]) for (const line of buildLines(account({ noLimitReported: true, width }))) expect(text(line).length).toBeLessThanOrEqual(width)
+  test('narrow, the note moves to the detail column and every line fits', async () => {
+    expect(find(buildLines(account({ noLimitReported: true, plan: 'Claude Enterprise', width: 60 })).map(text), /^Plan Limits/)).toMatch(/^Plan Limits  Enterprise +see \/usage$/)
+    for (const plan of [undefined, 'Claude Enterprise', 'Claude Platform on Google Cloud'])
+      for (const width of [40, 60, 72, 100, 160])
+        for (const line of buildLines(account({ noLimitReported: true, plan, width }))) expect(text(line).length).toBeLessThanOrEqual(width)
   })
 })
 
-describe('bars', () => {
-  test('a bar always shows how full something is, in its health colour; models keep to legends and names', async () => {
-    const v = base({
-      roster: [{ id: 'r', type: 'reviewer', description: 'review', status: 'running' }],
-      loops: { r: { model: 'claude-sonnet-5-5', tokens: 120_000 } },
+describe('shells', () => {
+  const ROWS = settingsFrom({ shells: 'rows' })
+  const shell = (id: string, name: string, command: string, minutes: number) => ({ id, name, command, startedAt: NOW - minutes * 60_000 })
+  const team = (patch: Partial<View> = {}): View =>
+    base({
+      roster: [
+        { id: 'e', type: 'Explore', description: 'look around', status: 'running' },
+        { id: 't', type: 'general-purpose', name: 'test-writer', description: 'write tests', status: 'running' },
+      ],
+      loops: { e: { model: 'claude-haiku-5-5', tokens: 30_000, sent: 30_000, received: 2_000, activity: 'Grep "x"' } },
+      shells: {
+        main: [shell('1', 'Start dev server', 'npm run dev', 74)],
+        t: [shell('2', 'Watch tests', 'npm test -- --watch', 12), shell('3', '', 'tail -f a.log', 3)],
+      },
+      settings: ROWS,
+      ...patch,
     })
+
+  test("each shell sits under the agent that started it, before that agent's own agents, with how long it has run", async () => {
+    const lines = buildLines(team()).map(text)
+    const tree = lines.slice(lines.findIndex(line => line.startsWith('Agents')))
+    expect(tree).toHaveLength(6)
+    expect(tree[1]).toMatch(/^ {13}├─\$ Start dev server · npm run dev · 1h14m$/)
+    expect(tree[2]).toMatch(/^ +├─● Explore /)
+    expect(tree[3]).toMatch(/^ +└─● test-writer /)
+    expect(tree[4]).toMatch(/^ {15}├─\$ Watch tests · npm test -- --watch · 12m$/)
+    // With no words of its own, a shell goes by its command, said once.
+    expect(tree[5]).toMatch(/^ {15}└─\$ tail -f a\.log · 3m$/)
+  })
+
+  test('a shell takes the whole row for what it is doing, keeping to none of the columns, and is cut at the edge', async () => {
+    const long = shell('4', 'Serve the storybook on port 6006 for the review', 'npx storybook dev --port 6006 --no-open', 5)
+    const lines = buildLines(team({ shells: { main: [long] }, width: 100 })).map(text)
+    const row = lines.find(line => line.includes('storybook'))!
+    expect(row).toMatch(/^ {13}├─\$ Serve the storybook on port 6006 for the review · npx storybook dev --port 6006 --…$/)
+    expect(row).toHaveLength(100)
+    // The agents' columns stay where they were: a shell never widens the key column.
+    expect(find(lines, /Explore/)).toBe(find(buildLines(team({ shells: {}, width: 100 })).map(text), /Explore/))
+  })
+
+  test('a shell is dim but its name, and its sign is plain ASCII', async () => {
+    const row = buildLines(team()).find(line => text(line).includes('npm run dev'))!
+    expect(row.filter(s => s.text.trim() && !s.dim).map(s => s.text.trim())).toEqual(['Start dev server'])
+    expect(row.some(s => s.text === '$ ')).toBe(true)
+    expect(row.some(s => s.color)).toBe(false)
+  })
+
+  test('when the tree runs out of room, shells give way first and the last row counts them', async () => {
+    // Seven rows: session and plan take three, so the tree has four.
+    const tree = (maxRows: number) => buildLines(team({ maxRows })).map(text).slice(3)
+    expect(tree(7)).toEqual([expect.stringMatching(/^Agents +● main/), expect.stringMatching(/Explore/), expect.stringMatching(/test-writer/), expect.stringMatching(/^ +\+3 more shells/)])
+    expect(tree(8)).toEqual([
+      expect.stringMatching(/^Agents +● main/),
+      expect.stringMatching(/Start dev/),
+      expect.stringMatching(/Explore/),
+      expect.stringMatching(/test-writer/),
+      expect.stringMatching(/^ +\+2 more shells/),
+    ])
+    expect(tree(5)).toEqual([expect.stringMatching(/^Agents +● main/), expect.stringMatching(/^ +\+2 more agents, 3 shells +$/)])
+    // All of it fits: nothing is counted.
+    expect(tree(20).join('\n')).not.toMatch(/more/)
+  })
+
+  test('collapsed, the shells are counted beside the agents', async () => {
+    expect(text(buildLines(team({ isCollapsed: true }))[0])).toMatch(/Agents 3 ●  3 \$  main 41%/)
+  })
+
+  test('by default each agent counts its shells on its own row, in a column of their own, and the tree keeps its height', async () => {
+    const lines = buildLines(team({ settings: SETTINGS, width: 120 })).map(text)
+    const tree = lines.slice(lines.findIndex(line => line.startsWith('Agents')))
+    expect(tree).toHaveLength(3)
+    expect(tree[0]).toMatch(/↑0 +↓0 +\$1  waiting on 2 agents$/)
+    expect(tree[1]).toMatch(/↑30k +↓2k +Grep "x"$/)
+    expect(tree[2]).toMatch(/ +\$2  write tests$/)
+    expect(new Set(tree.map(line => line.search(/waiting on|Grep "|write tests/))).size).toBe(1)
+    // With no shell running, the column goes and the activity moves back.
+    expect(buildLines(team({ settings: SETTINGS, shells: {} })).map(text).join('\n')).not.toMatch(/\$\d(?!\.)/)
+    expect(text(buildLines(team({ settings: SETTINGS, isCollapsed: true }))[0])).toMatch(/Agents 3 ●  3 \$  main/)
+    for (const width of [40, 60, 72, 100, 160]) for (const line of buildLines(team({ settings: SETTINGS, width }))) expect(text(line).length).toBeLessThanOrEqual(width)
+  })
+
+  test('/canopy set shells off hides them, and the tree is as before', async () => {
+    const off = buildLines(team({ settings: settingsFrom({ shells: 'off' }) })).map(text)
+    expect(off.join('\n')).not.toMatch(/\$ /)
+    expect(off).toEqual(buildLines(team({ shells: {} })).map(text))
+    expect(text(buildLines(team({ isCollapsed: true, settings: settingsFrom({ shells: 'off' }) }))[0])).toMatch(/Agents 3 ●  main/)
+  })
+
+  test('narrow, a shell keeps its name, command and time, and every line fits', async () => {
+    const tree = buildLines(team({ width: 60 })).map(text)
+    expect(tree.find(line => line.includes('Watch'))).toMatch(/^ +├─\$ Watch tests · npm test -- --watch · 12m$/)
+    for (const width of [40, 60, 72, 100, 120, 160]) for (const line of buildLines(team({ width }))) expect(text(line).length).toBeLessThanOrEqual(width)
+  })
+})
+
+describe('bars and numbers', () => {
+  const v = base({
+    roster: [
+      { id: 'r', type: 'reviewer', description: 'review', status: 'running' },
+      { id: 'x', type: 'Explore', description: 'look', status: 'running' },
+    ],
+    loops: { r: { model: 'claude-sonnet-5-5', tokens: 120_000 }, x: { model: 'claude-haiku-5-5', tokens: 160_000 } },
+  })
+
+  test("an agent's context bar is its health: green, then amber, then red", async () => {
     const lines = buildLines(v)
-    expect(text(lines[0])).not.toMatch(/▆|■{2}/)
-    const filled = lines.flatMap(line => line.filter(s => s.text.startsWith('▆') && !s.dim))
-    // The 5h and 7d windows, main's context and the reviewer's.
-    expect(filled.length).toBe(4)
-    for (const s of filled) expect(['success', 'warning', 'error']).toContain(s.color)
+    const fill = (pattern: RegExp) => lines.find(line => pattern.test(text(line)))!.filter(s => s.text.startsWith('▆') && !s.dim).map(s => s.color)
+    expect(fill(/● main/)).toEqual(['success'])
+    expect(fill(/reviewer/)).toEqual(['warning'])
+    expect(fill(/Explore/)).toEqual(['error'])
+  })
+
+  test("the session's bar is whole, split by the models that used it: the key to the plan bars' colours", async () => {
+    const session = buildLines(base({ sessionTokens: { opus: 55_000, sonnet: 31_000, haiku: 14_000 }, width: 120 }))[0]!
+    // 12 cells: Opus 6.6, Sonnet 3.7 and Haiku 1.7, the two left over to the larger remainders.
+    expect(session.filter(s => s.text.startsWith('▆')).map(s => [s.text.length, s.dim ? 'dim' : s.color])).toEqual([
+      [6, '#e879f9'],
+      [4, '#60a5fa'],
+      [2, '#22d3ee'],
+    ])
+    // Its legend stays, in line with the plan bars, and it has no percentage: a session has no limit.
+    expect(text(session)).toMatch(/^Session +100k tok +\$1\.12 +▆{12} +■ Opus 55%  ■ Sonnet 31%  ■ Haiku 14%$/)
+    // Before any tokens, no bar.
+    expect(text(buildLines(base({ sessionTokens: {} }))[0])).not.toMatch(/▆/)
+  })
+
+  test('a number is plain while all is well, and amber or red as it nears its limit', async () => {
+    const lines = buildLines(base({ ...v, limits: [{ kind: 'five_hour', percentUsed: 93 }, { kind: 'seven_day', percentUsed: 71 }, { kind: 'extra', percentUsed: 12 }] }))
+    const colour = (pattern: RegExp, value: RegExp) => lines.find(line => pattern.test(text(line)))!.find(s => value.test(s.text))?.color
+    expect(colour(/5h/, /^93%/)).toBe('error')
+    expect(colour(/7d/, /^71%/)).toBe('warning')
+    expect(colour(/extra/, /^12%/)).toBeUndefined()
+    // Main at 41% of its window is well short of compacting; the reviewer at 60% is past 60% of the way; Explore at 80% is past 90%.
+    expect(colour(/● main/, /^41%/)).toBeUndefined()
+    expect(colour(/reviewer/, /^60%/)).toBe('warning')
+    expect(colour(/Explore/, /^80%/)).toBe('error')
   })
 })

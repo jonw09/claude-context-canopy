@@ -23,7 +23,7 @@ const require = createRequire(import.meta.url)
 execFileSync(
   'tsc',
   ['--outDir', build, '--module', 'commonjs', '--target', 'es2023', '--skipLibCheck', '--noCheck', '--rootDir', root,
-    ...['layout', 'format', 'palette', 'tree', 'settings'].map(f => join(root, 'hooks', `${f}.ts`))],
+    ...['layout', 'format', 'palette', 'tree', 'settings', 'billing'].map(f => join(root, 'hooks', `${f}.ts`))],
   // Run from the build folder so the plugin's own tsconfig.json is not picked up.
   { stdio: 'inherit', cwd: build },
 )
@@ -105,8 +105,21 @@ const CROWD = {
   maxRows: 11,
 }
 
-// No window reported.
-const ORGANISATION = { limits: [], planSplit: {}, usd: 18.4 }
+// No window reported, on a seat whose plan the welcome logo names.
+const ORGANISATION = { limits: [], planSplit: {}, usd: 18.4, plan: 'Claude Enterprise' }
+
+// Shells the agents left running in the background.
+const SHELLS = {
+  ...TEAM,
+  loops: { ...TEAM.loops, t: { ...TEAM.loops.t, activity: 'Bash: npm test -- orders' } },
+  shells: {
+    main: [{ id: '1', name: 'Dev server', command: 'npm run dev', startedAt: NOW - 74 * 60_000 }],
+    t: [
+      { id: '2', name: 'Watch tests', command: 'npm test -- --watch', startedAt: NOW - 12 * 60_000 },
+      { id: '3', name: '', command: 'tail -f app.log', startedAt: NOW - 3 * 60_000 },
+    ],
+  },
+}
 
 // The README shows the first three at the top, in this order, and the rest further down.
 const SCREENS = [
@@ -119,7 +132,7 @@ const SCREENS = [
   { file: 'band.png', title: 'Pro or Max, with more agents than the band has room for', v: view(CROWD) },
   {
     file: 'no-limit.png',
-    title: 'Enterprise, an API key or a cloud provider: no limit reported',
+    title: 'Enterprise: no limit reported, so the plan line says where to look',
     v: view({ ...ORGANISATION, ...CROWD, noLimitReported: true }),
   },
   {
@@ -132,6 +145,13 @@ const SCREENS = [
       ],
       main: { ...MAIN, tokens: 151_000, sent: 318_600, received: 18_400, activity: 'Bash: npm test' },
     }),
+  },
+  { file: 'shells.png', title: 'Shells left running in the background, counted on their agents', above: 'Started the dev server', v: view(SHELLS) },
+  {
+    file: 'shells-rows.png',
+    title: '/canopy set shells rows',
+    above: 'Started the dev server',
+    v: view({ ...SHELLS, settings: settingsFrom({ shells: 'rows' }) }),
   },
   { file: 'collapsed.png', title: 'Collapsed with /canopy', v: view({ ...TEAM, isCollapsed: true }) },
   { file: 'narrow.png', title: 'A narrow terminal (60 columns)', v: view({ ...TEAM, width: 60 }) },

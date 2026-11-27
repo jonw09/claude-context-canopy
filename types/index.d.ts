@@ -3,7 +3,10 @@ export type Family = 'fable' | 'opus' | 'sonnet' | 'haiku' | 'other'
 export type FamilyTokens = Partial<Record<Family, number>>
 
 /** What `/canopy set` has changed from the defaults. */
-export type Overrides = Partial<Record<'amber' | 'red', number> & Record<'plan' | 'session' | 'agents' | 'split', boolean>>
+export type Overrides = Partial<Record<'amber' | 'red', number> & Record<'plan' | 'session' | 'agents' | 'split', boolean> & { shells: ShellsMode }>
+
+/** How background shells show: a count on the agent's row, a row each under it, or not at all. */
+export type ShellsMode = 'count' | 'rows' | 'off'
 
 export type LimitWindow = { kind: string; percentUsed: number; resetsAt?: string }
 
@@ -33,6 +36,31 @@ export type LoopLive = {
   activity?: string
 }
 
+/** A shell call whose answer hasn't been read yet, which may say its command went on in the background. */
+export type ShellCall = {
+  /** The call's tool use id, which the task notice names when the command finishes. */
+  id: string
+  /** The call's own few words for the command; empty when it gave none. */
+  name: string
+  command: string
+}
+
+/** A command an agent left running in the background. */
+export type Shell = ShellCall & {
+  /** The background task's id, which a task notice may name instead. */
+  taskId?: string
+  /** When the band first read that it was running in the background. */
+  startedAt: number
+}
+
+/** What the band knows of one agent's background shells. */
+export type ShellWatch = {
+  calls: ShellCall[]
+  open: Shell[]
+  /** The tool use ids of shells that have finished, so a later read never brings one back. */
+  ended: string[]
+}
+
 export type MainContext = {
   /** The main loop's model as `/model` shows it, before any request has said which model served it. */
   model?: string
@@ -57,6 +85,8 @@ declare module 'claude-code' {
       loops: Record<string, LoopLive>
       isCollapsed: boolean
       overrides: Overrides
+      plan: string | null
+      shells: Record<string, ShellWatch>
     }
   }
 }

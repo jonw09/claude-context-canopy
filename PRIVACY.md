@@ -16,10 +16,13 @@ Through Claude Code's plugin API, as the session runs:
 - this session's model, token counts, cost and plan limit windows
 - the list of running agents, with each agent's name, type, description and status
 - from each of Claude's replies, its model, token counts, and the name and main argument of the last tool call it asks for (a file path, a shell command, a search pattern or web search, the site of a web fetch, or an agent's task description), to show what each agent is doing
+- an agent's newest conversation rows, only after it asks for a shell command or while it has one running in the background, to find a background shell's start and the notice that it has finished. Of those rows it keeps only each shell's ids, its description and its command
+- at the start of each turn, its text, only to look for a notice that a background shell has finished
+- the plan line of Claude Code's welcome logo in the terminal (such as `Claude Enterprise` or `API Usage Billing`), to name your plan when Claude Code reports no limit
 - the apps attached to the session, for `/canopy status`
 - Claude Code's version number, so the band is drawn in a way that version accepts
 
-The agents' activity is held in memory for the session only. It is drawn in the band and never saved or sent anywhere.
+The agents' activity, their background shells and the plan's name are held in memory for the session only. They are drawn in the band and never saved or sent anywhere.
 
 ## What it keeps
 
@@ -39,11 +42,12 @@ Nothing. Every event it hooks is passed on unchanged, except that it answers its
 
 ## What it adds
 
-The `/canopy` command, which it answers itself. It adds no tools and no agents, handles no other command and calls no model. `/canopy show` prints the band as text into your conversation, activity included, so it becomes part of the session like any other command output. Nothing else the plugin draws enters the conversation.
+The `/canopy` command, which it answers itself. It adds no tools and no agents, handles no other command and calls no model. `/canopy show` prints the band as text into your conversation, activity and background shells' commands included, so it becomes part of the session like any other command output. Nothing else the plugin draws enters the conversation.
 
 ## Turning things off
 
 - `/canopy set plan off`, `session off` or `agents off` hide those parts of the band.
+- `/canopy set shells off` hides background shells and stops the plugin reading agents' conversations for them.
 - Uninstalling the plugin stops all of it: `claude plugin uninstall context-canopy`.
 
 ## Questions
