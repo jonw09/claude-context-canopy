@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/jonw09/claude-context-canopy/compare/v0.3.2...v0.4.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove the month's spend and extra usage rows, so the plugin reads no login and makes no network request, as the plugin directory requires
+
+### Bug Fixes
+
+* keep the band drawing on Claude Code before 2.1.331 ([d4e838e](https://github.com/jonw09/claude-context-canopy/commit/d4e838e42570aa137369a2671576b5b4a16b29f9))
+* line the band up in the desktop app ([d4e838e](https://github.com/jonw09/claude-context-canopy/commit/d4e838e42570aa137369a2671576b5b4a16b29f9))
+* remove the month's spend and extra usage rows, so the plugin reads no login and makes no network request, as the plugin directory requires ([d4e838e](https://github.com/jonw09/claude-context-canopy/commit/d4e838e42570aa137369a2671576b5b4a16b29f9))
+
 ## [0.3.2](https://github.com/jonw09/claude-context-canopy/compare/v0.3.1...v0.3.2) (2026-10-29)
 
 
