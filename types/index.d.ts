@@ -3,7 +3,10 @@ export type Family = 'fable' | 'opus' | 'sonnet' | 'haiku' | 'other'
 export type FamilyTokens = Partial<Record<Family, number>>
 
 /** What `/canopy set` has changed from the defaults. */
-export type Overrides = Partial<Record<'amber' | 'red', number> & Record<'plan' | 'session' | 'agents' | 'shells' | 'split', boolean>>
+export type Overrides = Partial<Record<'amber' | 'red', number> & Record<'plan' | 'session' | 'agents' | 'split', boolean> & { shells: ShellsMode }>
+
+/** How background shells show: a count on the agent's row, a row each under it, or not at all. */
+export type ShellsMode = 'count' | 'rows' | 'off'
 
 export type LimitWindow = { kind: string; percentUsed: number; resetsAt?: string }
 

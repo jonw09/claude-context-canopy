@@ -409,7 +409,7 @@ test('a spend setting an earlier version saved is dropped', async ($, on) => {
   engine(on, { stored: { settings: { spend: false, plan: false } } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect((await $.command.run(canopy('set split off'))).text).toBe('Context Canopy settings: plan off, split off.')
-  expect((await $.command.run(canopy('set spend on'))).text).toMatch(/^Use \/canopy set amber\|red <percent>, \/canopy set plan\|session\|agents\|shells\|split on\|off/)
+  expect((await $.command.run(canopy('set spend on'))).text).toMatch(/^Use \/canopy set amber\|red <percent>, \/canopy set plan\|session\|agents\|split on\|off, \/canopy set shells count\|rows\|off/)
 })
 
 test('/canopy set changes a setting for later sessions, and reset puts the defaults back', async ($, on) => {
@@ -508,7 +508,7 @@ test('a shell an agent leaves running in the background shows under it until its
   await step($)
   expect(reads.at(-1)).toEqual({ after: 'm1' })
   await clock.advance(12 * 60_000)
-  expect(await show()).toMatch(/└─\$ Start dev server +shell +12m +npm run dev/)
+  expect(await show()).toMatch(/└─\$ Start dev server · npm run dev · 12m/)
 
   // The notice that it finished starts main's next turn: the shell goes at once.
   await $.turn.start({ turnId: 't2', text: '<task-notification>\n<task-id>b7k2</task-id>\n<status>completed</status>\n</task-notification>' })

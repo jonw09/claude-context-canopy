@@ -30,7 +30,7 @@ export type View = {
   maxRows?: number
 }
 
-type Row = { guides: string; glyph: string; name: string; live: LoopLive; activity: string; isMain?: boolean; isIdle?: boolean; shell?: Shell }
+type Row = { id: string; guides: string; glyph: string; name: string; live: LoopLive; activity: string; isMain?: boolean; isIdle?: boolean; shell?: Shell }
 
 /** One entry of the agent tree: an agent, or a shell one of them left running, under it. */
 type Entry = { guides: string; node: TreeNode; shell?: undefined } | { guides: string; shell: Shell; node?: undefined }
@@ -58,7 +58,8 @@ const HEADING = { dim: true, bold: true }
 const GLYPH: Record<string, string> = { pending: '◌', running: '●', waiting: '◐', idle: '○' }
 
 const seg = (text: string, style: Omit<Seg, 'text'> = {}): Seg => ({ text, ...style })
-const healthSeg = (text: string, health: Health): Seg => seg(text, { color: HEALTH_COLOUR[health] })
+/** Health shows on numbers alone, and only when it calls for a look: plain while all is well, then amber, then red. */
+const healthSeg = (text: string, health: Health): Seg => seg(text, health === 'ok' ? {} : { color: HEALTH_COLOUR[health] })
 const percent = (n: number): string => `${Math.round(n)}%`
 const total = (parts: [Family, number][]): number => parts.reduce((sum, [, n]) => sum + n, 0)
 const shares = (t: FamilyTokens): [Family, number][] => FAMILIES.flatMap(f => (t[f] ? [[f, t[f]] as [Family, number]] : []))
@@ -81,7 +82,14 @@ const planKeys = (v: View): [string, string][] => [
 /** Wide enough for the longest plan row name. */
 const nameWidth = (v: View): number => Math.max(0, ...planKeys(v).map(([name]) => name.length)) + 2
 const agentKeyRoom = (v: View): number => (v.width >= WIDE ? KEY * 1.5 : KEY)
-const shellsOf = (v: View, id: string): readonly Shell[] => (v.settings.showShells ? (v.shells?.[id] ?? []) : [])
+/** An agent's shells as rows of the tree, when they are shown that way. */
+const shellsOf = (v: View, id: string): readonly Shell[] => (v.settings.shells === 'rows' ? (v.shells?.[id] ?? []) : [])
+/** How many shells an agent has running, for the count on its row. */
+const shellCount = (v: View, id: string): number => (v.settings.shells === 'count' ? (v.shells?.[id]?.length ?? 0) : 0)
+/** Every shell running, however they are shown. */
+const allShells = (v: View): number => (v.settings.shells === 'off' ? 0 : Object.values(v.shells ?? {}).reduce((n, list) => n + list.length, 0))
+/** The column a shell count takes, `$2` and its gap, on every agent row once any agent has one. */
+const COUNT = 4
 /** A shell's name in the tree: its own few words, else its command. */
 const shellName = (shell: Shell): string => shell.name || shell.command
 
@@ -105,7 +113,7 @@ function entries(v: View, roots: readonly TreeNode[], own: readonly Shell[], lea
 /** The longest agent key, guides, status and name, with a column to spare. */
 const agentKeyLength = (v: View): number =>
   v.settings.showAgents
-    ? Math.max(0, ...entries(v, buildTree(v.roster), shellsOf(v, 'main')).map(e => e.guides.length + 3 + (e.shell ? shellName(e.shell) : (e.node.name ?? e.node.type)).length))
+    ? Math.max(0, ...flatten(buildTree(v.roster)).map(({ node, guides }) => guides.length + 3 + (node.name ?? node.type).length))
     : 0
 
 /** Wide enough for every row's key, with a column to spare: a plan row and its reset time, or a long agent name on a wide terminal. */
@@ -115,22 +123,30 @@ function keyWidth(v: View, narrow: boolean): number {
   return Math.max(agents, ...planKeys(v).map(([, key]) => nameWidth(v) + key.length + 1))
 }
 
-/**
- * How full something is: a window, a spend limit or a context. Every gauge is
- * coloured by health and nothing else, so a bar always means one thing.
- * Anything above nothing fills a cell.
- */
-function gauge(pct: number, health: Health): Line {
-  const filled = Math.max(pct > 0 ? 1 : 0, Math.min(BAR, Math.round((pct / 100) * BAR)))
+/** The cells of a bar `pct` full. Anything above nothing fills one. */
+const cellsOf = (pct: number): number => Math.max(pct > 0 ? 1 : 0, Math.min(BAR, Math.round((pct / 100) * BAR)))
 
-  return [seg('▆'.repeat(filled), { color: HEALTH_COLOUR[health] }), seg('▆'.repeat(BAR - filled), DIM)].filter(s => s.text)
+/**
+ * How full something is, a plan window or a context, its fill in the colours of
+ * the models that filled it. A bar says what something is made of; the number
+ * beside it says whether it needs a look.
+ */
+function gauge(pct: number, parts: [Family, number][]): Line {
+  const filled = cellsOf(pct)
+  const sum = total(parts)
+  // Each model's cells by its share, the cells left over going to the largest remainders.
+  const exact = parts.map(([family, n]) => ({ family, cells: sum ? (n / sum) * filled : 0 }))
+  const cells = exact.map(p => ({ ...p, whole: Math.floor(p.cells) }))
+  let left = filled - cells.reduce((n, p) => n + p.whole, 0)
+  for (const p of [...cells].sort((a, b) => b.cells - b.whole - (a.cells - a.whole))) if (left > 0 && p.cells > 0) (p.whole += 1), (left -= 1)
+  const fill = sum ? cells.map(p => seg('▆'.repeat(p.whole), { color: FAMILY_COLOUR[p.family] })) : [seg('▆'.repeat(filled), { color: FAMILY_COLOUR.other })]
+
+  return [...fill, seg('▆'.repeat(BAR - filled), DIM)].filter(s => s.text)
 }
 
-/** Every model with a legend anywhere in the band, so each keeps one slot down every row. */
+/** The models in the session line's legend, the one legend in the band and the key to the plan bars' colours. */
 function legendFamilies(v: View): Family[] {
-  const rows = [v.sessionTokens, ...(v.settings.estimate ? v.limits.map(w => v.planSplit[w.kind] ?? {}) : [])]
-
-  return FAMILIES.filter(f => rows.some(row => row[f]))
+  return FAMILIES.filter(f => v.sessionTokens[f])
 }
 
 /**
@@ -199,16 +215,19 @@ export function contextOf(live: LoopLive, main: MainContext & LoopLive, settings
 
 const isHot = (live: LoopLive, v: View): boolean => contextOf(live, v.main, v.settings)?.health === 'bad'
 
+/**
+ * A plan window: its bar split by the models that used it, an estimate from
+ * this machine marked `≈`, and how much is used, plain until it nears the limit.
+ */
 function windowCells(w: LimitWindow, v: View, width: number): Cells {
   const health = planHealth(w.percentUsed, v)
   const parts = v.settings.estimate ? shares(v.planSplit[w.kind] ?? {}) : []
 
   return {
     key: [seg(pad(windowLabel(w.kind), width)), seg(resetKey(w.resetsAt, v.now), DIM)],
-    bar: gauge(w.percentUsed, health),
+    bar: gauge(w.percentUsed, parts),
     value: healthSeg(percent(w.percentUsed), health),
-    detail:
-      w.percentUsed >= 100 ? [gutter(), LIMITED] : room => legend(parts, legendFamilies(v), room, '≈'),
+    detail: w.percentUsed >= 100 ? [gutter(), LIMITED] : parts.length ? [gutter('≈')] : [],
   }
 }
 
@@ -261,19 +280,31 @@ function flow(live: LoopLive, isMain = false): Seg {
   return seg(pad(text, FLOW), DIM)
 }
 
+/** `$2`: how many shells an agent has running, in a column of its own once any agent has one. */
+function countCell(r: Row, v: View, id: string): Seg[] {
+  if (!anyCount(v)) return []
+  const n = shellCount(v, id)
+
+  return [seg(pad(n ? `${SHELL}${n}` : '', COUNT))]
+}
+
+const anyCount = (v: View): boolean => v.settings.shells === 'count' && Object.values(v.shells ?? {}).some(list => list.length > 0)
+
 function agentLine(r: Row, v: View, narrow: boolean, heading: string): Line {
-  const colour = { color: FAMILY_COLOUR[familyOf(r.live.model)] }
+  const family = familyOf(r.live.model)
+  const colour = { color: FAMILY_COLOUR[family] }
   const model = r.live.model ? modelLabel(r.live.model) : '…'
   const context = contextOf(r.live, v.main, v.settings)
   const warning = isHot(r.live, v) ? [healthSeg(r.isMain ? '/compact soon · ' : 'compacts soon · ', 'bad')] : []
   const cells: Cells = {
     key: [seg(r.guides, DIM), seg(`${r.glyph} `, r.isIdle ? DIM : colour), seg(r.name, { bold: true })],
     model: seg(narrow ? model.split(' ')[0]! : model, colour),
-    bar: context ? gauge(context.pct, context.health) : [seg('·'.repeat(BAR), DIM)],
+    bar: context ? gauge(context.pct, [[family, 1]]) : [seg('·'.repeat(BAR), DIM)],
     value: context ? healthSeg(percent(context.pct), context.health) : seg('—', DIM),
     detail: [
       warning.length ? warnGutter() : gutter(),
       ...(narrow ? [] : [flow(r.live, r.isMain)]),
+      ...countCell(r, v, r.id),
       ...warning,
       seg(r.activity, r.isIdle ? DIM : {}),
     ],
@@ -283,20 +314,21 @@ function agentLine(r: Row, v: View, narrow: boolean, heading: string): Line {
 }
 
 /**
- * A shell an agent left running, under it: its name, how long it has run, and
- * its command in line with the agents' activity. It has no bar, as there is
- * nothing for it to fill.
+ * A shell an agent left running, under it. It has no model, bar or counts, so
+ * it keeps to none of the grid's columns and takes the whole row for what it
+ * is doing: its name, its command and how long it has run, cut at the edge.
  */
-function shellLine(r: Row, shell: Shell, v: View, narrow: boolean): Line {
+function shellLine(r: Row, shell: Shell, v: View): Line {
   const name = shellName(shell)
-  const cells: Cells = {
-    key: [seg(r.guides, DIM), seg(`${SHELL} `, DIM), seg(name)],
-    model: seg('shell', DIM),
-    value: seg(duration(v.now - shell.startedAt), DIM),
-    detail: [gutter(), ...(narrow ? [] : [seg(pad('', FLOW))]), seg(name === shell.command ? '' : shell.command, DIM)],
-  }
 
-  return row('', cells, v, narrow)
+  return [
+    label(''),
+    seg(r.guides, DIM),
+    seg(`${SHELL} `, DIM),
+    seg(name),
+    ...(shell.name && shell.command ? [seg(` · ${shell.command}`, DIM)] : []),
+    seg(` · ${duration(v.now - shell.startedAt)}`, DIM),
+  ]
 }
 
 /** `+3 more agents, 2 shells`, or `+2 more shells` when only shells are hidden. */
@@ -333,19 +365,19 @@ function fit(rows: readonly Row[], room: number): Row[] {
 function agentLines(v: View, narrow: boolean, room = Infinity): Line[] {
   const roots = buildTree(v.roster)
   const rows: Row[] = [
-    { guides: '', glyph: '●', name: 'main', live: v.main, activity: v.main.activity || waiting(roots.length) || 'ready', isMain: true },
+    { id: 'main', guides: '', glyph: '●', name: 'main', live: v.main, activity: v.main.activity || waiting(roots.length) || 'ready', isMain: true },
     ...entries(v, roots, shellsOf(v, 'main')).map(({ node, shell, guides }): Row => {
-      if (shell) return { guides, glyph: SHELL, name: shellName(shell), live: {}, activity: '', shell }
+      if (shell) return { id: shell.id, guides, glyph: SHELL, name: shellName(shell), live: {}, activity: '', shell }
       const live = v.loops[node.id] ?? {}
       const isIdle = node.status === 'idle'
       const activity = live.activity || waiting(node.children.length) || (isIdle ? 'idle' : (node.description ?? ''))
 
-      return { guides, glyph: GLYPH[node.status] ?? '●', name: node.name ?? node.type, live, activity, isIdle }
+      return { id: node.id, guides, glyph: GLYPH[node.status] ?? '●', name: node.name ?? node.type, live, activity, isIdle }
     }),
   ]
 
   const shown = fit(rows, room)
-  const lines = shown.map((r, i) => (r.shell ? shellLine(r, r.shell, v, narrow) : agentLine(r, v, narrow, i ? '' : 'Agents')))
+  const lines = shown.map((r, i) => (r.shell ? shellLine(r, r.shell, v) : agentLine(r, v, narrow, i ? '' : 'Agents')))
   const hidden = rows.filter(r => !shown.includes(r))
 
   return hidden.length ? [...lines, moreLine(hidden, v, narrow)] : lines
@@ -378,7 +410,7 @@ function collapsedAgents(v: View): Line {
   const agents = flatten(buildTree(v.roster))
   const hot = agents.filter(({ node }) => isHot(v.loops[node.id] ?? {}, v)).length
   const main = contextOf(v.main, v.main, v.settings)
-  const shells = entries(v, buildTree(v.roster), shellsOf(v, 'main')).filter(e => e.shell).length
+  const shells = allShells(v)
 
   return [
     seg('Agents ', HEADING),

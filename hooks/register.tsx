@@ -16,7 +16,7 @@ const MARGIN = 1
 const LOG_KEY = 'usage-log'
 const SESSIONS_KEY = 'sessions'
 const SETTINGS_KEY = 'settings'
-const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|shells|split on|off, or /canopy reset.'
+const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|split on|off, /canopy set shells count|rows|off, or /canopy reset.'
 /** How many of an agent's newest rows the first look at its conversation reads, to find the shell call its reply just made. */
 const FIRST_READ = 40
 
@@ -200,7 +200,7 @@ async function pollAgents($: EngineInterface): Promise<void> {
  * the rows but the shells' ids, names and commands.
  */
 async function followShells($: EngineInterface, id: string, toolUses: readonly { name: string }[]): Promise<void> {
-  if (!settingsFrom(await read($, overrides)).showShells) return
+  if (settingsFrom(await read($, overrides)).shells === 'off') return
   const before = (await read($, shells))[id]
   if (!isWatching(before) && !toolUses.some(use => isShellCall(use.name))) return
   const agent = id === MAIN ? {} : { agentId: id }
@@ -268,7 +268,12 @@ async function recordStep($: EngineInterface, id: string, model: string, usage: 
 }
 
 /** The band as lines for `width` columns; `collapsed` overrides the person's choice, and `maxRows` caps the tree. */
-async function snapshot($: EngineInterface, width: number, { collapsed, maxRows }: { collapsed?: boolean; maxRows?: number } = {}): Promise<Line[]> {
+async function snapshot(
+  $: EngineInterface,
+  width: number,
+  { collapsed, maxRows, isFull }: { collapsed?: boolean; maxRows?: number; isFull?: boolean } = {},
+): Promise<Line[]> {
+  const settings = settingsFrom(await read($, overrides))
   const allLoops = await read($, loops)
   const mainContext = await read($, main)
   const windows = await read($, limits)
@@ -287,7 +292,8 @@ async function snapshot($: EngineInterface, width: number, { collapsed, maxRows 
     roster: await read($, roster),
     loops: allLoops,
     isCollapsed: collapsed ?? (await read($, isCollapsed)),
-    settings: settingsFrom(await read($, overrides)),
+    // Printed in full, with no height to keep to, shells counted on their agents' rows are listed too.
+    settings: isFull && settings.shells === 'count' ? { ...settings, shells: 'rows' } : settings,
     maxRows,
   })
 }
@@ -306,7 +312,7 @@ async function statusReport($: EngineInterface): Promise<string> {
 async function setOverrides($: EngineInterface, change: (now: Overrides) => Overrides): Promise<string> {
   const now = await update($, overrides, change)
   await $.store.set(SETTINGS_KEY, now)
-  const changed = Object.entries(now).map(([key, value]) => `${key} ${typeof value === 'number' ? `${value}%` : value ? 'on' : 'off'}`)
+  const changed = Object.entries(now).map(([key, value]) => `${key} ${typeof value === 'number' ? `${value}%` : typeof value === 'string' ? value : value ? 'on' : 'off'}`)
 
   return `Context Canopy settings: ${changed.join(', ') || 'all defaults'}.`
 }
@@ -391,7 +397,7 @@ export const register: Register = on => {
     }
     if (arg === 'show') {
       const width = Math.min(Number(size) >= 30 ? Number(size) : e.presentation.columns || 60, 160)
-      const lines = await snapshot($, width, { collapsed: false })
+      const lines = await snapshot($, width, { collapsed: false, isFull: true })
 
       return { text: ['```', ...lines.map(line => line.map(s => s.text).join('').trimEnd()), '```'].join('\n') }
     }

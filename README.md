@@ -26,12 +26,12 @@ Your session, plan limits and every running agent, in one band above the Claude 
 | --- | --- |
 | **Session** | Tokens and cost for this session, and each model's share |
 | **Plan** | Your plan's limits: how full each is, when it resets, and an estimate of which models used it. On Pro and Max that's the 5-hour and 7-day windows |
-| **Agents** | Every running agent as a tree, however deep: its model, how full its context is, the tokens it has sent and received, and what it is doing right now. Under each agent, the shells it has left running in the background |
+| **Agents** | Every running agent as a tree, however deep: its model, how full its context is, the tokens it has sent and received, how many shells it has left running in the background, and what it is doing right now |
 
 Two rules keep it quick to read:
 
-- **A bar always means how full something is**, a plan window or an agent's context, and its colour is always its health: green, then amber, then red. Its percentage sits next to it in the same colour.
-- **Model colours only name models**, never fill a bar: **Fable** violet, **Opus** magenta, **Sonnet** blue, **Haiku** cyan, on model names and the `■` shares.
+- **A bar's colours say which models filled it.** A plan window's bar is split by the models that used it, and an agent's context bar is its model's colour: **Fable** violet, **Opus** magenta, **Sonnet** blue, **Haiku** cyan. The session line's `■` shares are the key.
+- **A number's colour says whether it needs a look.** Percentages stay plain while all is well, and turn **amber**, then **red**, as a plan window or an agent's context nears its limit. A calm band has almost no warning colour, so whatever needs you stands out.
 
 ## Install
 
@@ -102,9 +102,9 @@ The cost is Claude Code's own figure, as `/cost` shows it, worked out at API pri
 
 ![Plan line near the limit: the 5-hour window at 93% in red and the 7-day window at 71% in amber](docs/images/limit.png)
 
-- The bar and percentage show how full the window is. They turn **amber from 60%** and **red from 90%**, and you can move both with [`/canopy set`](#settings).
+- The bar shows how full the window is, split into the colours of the models that used it. `≈` after the percentage marks that split as an estimate (see [Good to know](#good-to-know)). With `/canopy set split off`, or before there's anything to split by, the bar is one grey fill.
+- The percentage turns **amber from 60%** and **red from 90%**, and you can move both with [`/canopy set`](#settings).
 - `↻ 41m` is the time until the window resets. A full window reads `limited`.
-- `≈` marks the model shares as an estimate (see [Good to know](#good-to-know)).
 
 The 5-hour and 7-day windows appear after Claude's first reply, when they're first reported.
 
@@ -128,11 +128,12 @@ The plan's name comes from the plan line of Claude Code's welcome logo, which on
 Each row shows:
 
 ```
-├─● reviewer        Sonnet 5.5  ▆▆▆▆▆▆▆▆▆▆▆▆  59%     ↑112k  ↓6k    Read billing/invoice.ts
-│ │                 │           │             │       │             └ what it is doing now
+├─● test-writer     Sonnet 5.5  ▆▆▆▆▆▆▆▆▆▆▆▆  59%     ↑112k  ↓6k    $2  Bash: npm test -- orders
+│ │                 │           │             │       │             │   └ what it is doing now
+│ │                 │           │             │       │             └ shells it has left running in the background
 │ │                 │           │             │       └ tokens sent ↑ and received ↓
-│ │                 │           │             └ context used, of the full window
-│ │                 │           └ context bar, coloured by health
+│ │                 │           │             └ context used, of the full window: amber, then red, as it nears compacting
+│ │                 │           └ context bar, in the model's colour
 │ │                 └ model, in its colour
 │ └ status: ● running  ◐ waiting  ◌ starting  ○ idle
 └ tree guides showing who started whom
@@ -142,9 +143,9 @@ The tokens are counted the same way as the session line, so all the agents add u
 
 Context colours are tied to the point where Claude Code **auto-compacts** the conversation, not to the raw window size:
 
-| Colour | When | What to do |
+| Percentage | When | What to do |
 | --- | --- | --- |
-| 🟩 Green | under 60% of the way to auto-compact | nothing |
+| Plain | under 60% of the way to auto-compact | nothing |
 | 🟨 Amber | 60% to 89% of the way | long contexts start to lose quality from here |
 | 🟥 Red, `⚠ compacts soon` | 90% of the way or more | consider `/compact`, or let it happen |
 
@@ -152,23 +153,26 @@ These are the same 60% and 90% points as the plan line, and [`/canopy set`](#set
 
 The main row names your model from the start, and changes as soon as you switch with `/model`. If a request falls back to another model, the row shows the one that answered.
 
-**Background shells.** A command an agent leaves running in the background, such as a dev server or a test watcher, shows straight under that agent, with how long it has run and its command in line with the agents' activity:
+**Background shells.** A command an agent leaves running in the background, such as a dev server or a test watcher, is counted on that agent's row: `$2` is two shells. The count takes a column of its own, between the token counts and the activity, only while a shell is running, so the band never grows taller for them. It goes down as a command finishes or is stopped, and an agent's shells go when it ends. A command running in the foreground already shows as the agent's activity (`Bash: npm test`).
+
+![Background shells counted on their agents' rows: $1 on main and $2 on test-writer](docs/images/shells.png)
+
+To see each shell, `/canopy set shells rows` gives each one a row of its own under its agent, with the whole row for what it is doing:
 
 ```
-├─$ Dev server      shell                     1h14m                 npm run dev
-│ │ │               │                         │                     └ its command
-│ │ │               │                         └ how long it has run
-│ │ │               └ a shell, not a model: it has no bar, as there's nothing for it to fill
+├─$ Dev server · npm run dev · 1h14m
+│ │ │            │             └ how long it has run
+│ │ │            └ its command
 │ │ └ what Claude called it, or its command
 │ └ $ marks a shell
 └ under the agent that started it
 ```
 
-It goes when the command finishes or is stopped, or when its agent ends. A command running in the foreground already shows as the agent's activity (`Bash: npm test`). `/canopy set shells off` hides them.
+![Background shells as rows: a dev server under main, and a test watcher and a log tail under test-writer](docs/images/shells-rows.png)
 
-![Background shells in the tree: a dev server under main, and a test watcher and a log tail under test-writer](docs/images/shells.png)
+`/canopy show` always lists them that way, as it has no height to keep to. `/canopy set shells off` hides them.
 
-**A tall tree** is cut to fit the room Claude Code gives the band. Shells give way first, so every agent keeps its row while there's room for it. The tree then ends with a row such as `+3 more agents, 2 shells`, adding `⚠ 1 compacts soon` if any of the hidden agents are near compacting. `/canopy show` prints the whole tree.
+**A tall tree** is cut to fit the room Claude Code gives the band. With shells as rows, they give way first, so every agent keeps its row while there's room for it. The tree then ends with a row such as `+3 more agents, 2 shells`, adding `⚠ 1 compacts soon` if any of the hidden agents are near compacting. `/canopy show` prints the whole tree.
 
 **Long agent names** get up to half as much room again in a terminal 120 columns or wider, before they're cut.
 
@@ -196,13 +200,13 @@ There's nothing to set up: the defaults suit most people. To change one, use `/c
 
 | Command | Default | What it does |
 | --- | --- | --- |
-| `/canopy set amber 70` | 60 | Turn amber from this %: of a plan window used, or of the way to auto-compact for context |
+| `/canopy set amber 70` | 60 | Turn a percentage amber from this %: of a plan window used, or of the way to auto-compact for context |
 | `/canopy set red 95` | 90 | Turn red from this %, measured the same way |
 | `/canopy set plan off` | on | The plan line |
 | `/canopy set session off` | on | The session line |
 | `/canopy set agents off` | on | The agent tree |
-| `/canopy set shells off` | on | Background shells in the agent tree |
-| `/canopy set split off` | on | The `≈` model shares on the plan line |
+| `/canopy set shells rows` | count | Background shells: `count` on each agent's row, a row each with `rows`, or `off` |
+| `/canopy set split off` | on | The plan bars' split by model, marked `≈` |
 
 For example, to keep only the agent tree:
 

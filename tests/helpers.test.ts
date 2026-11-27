@@ -168,7 +168,7 @@ describe('settings', () => {
       showPlan: true,
       showSession: true,
       showAgents: true,
-      showShells: true,
+      shells: 'count',
       estimate: true,
     })
   })
@@ -179,13 +179,17 @@ describe('settings', () => {
   })
 
   test('switches are read as given', async () => {
-    expect(settingsFrom({ plan: false, split: false, shells: false })).toMatchObject({ showPlan: false, estimate: false, showShells: false })
+    expect(settingsFrom({ plan: false, split: false, shells: 'rows' })).toMatchObject({ showPlan: false, estimate: false, shells: 'rows' })
   })
 
   test('/canopy set reads percentages and switches, and nothing else', async () => {
     expect(overrideFrom('amber', '70')).toEqual({ amber: 70 })
     expect(overrideFrom('split', 'off')).toEqual({ split: false })
-    expect(overrideFrom('shells', 'off')).toEqual({ shells: false })
+    expect(overrideFrom('shells', 'off')).toEqual({ shells: 'off' })
+    expect(overrideFrom('shells', 'rows')).toEqual({ shells: 'rows' })
+    expect(overrideFrom('shells', 'on')).toEqual({ shells: 'count' })
+    expect(overrideFrom('shells', 'lots')).toBeUndefined()
+    expect(overrideFrom('plan', 'rows')).toBeUndefined()
     // The spend switch went with the spend request.
     expect(overrideFrom('spend', 'off')).toBeUndefined()
     expect(overrideFrom('amber', 'lots')).toBeUndefined()
@@ -193,17 +197,17 @@ describe('settings', () => {
   })
 
   test('saved settings keep what this version has, and drop the rest', async () => {
-    expect(overridesFrom({ amber: 70, red: 95, plan: false, session: true, agents: false, shells: false, split: false })).toEqual({
+    expect(overridesFrom({ amber: 70, red: 95, plan: false, session: true, agents: false, shells: 'rows', split: false })).toEqual({
       amber: 70,
       red: 95,
       plan: false,
       session: true,
       agents: false,
-      shells: false,
+      shells: 'rows',
       split: false,
     })
     // An earlier version saved `spend`; a value of the wrong kind is dropped too.
-    expect(overridesFrom({ spend: false, amber: '70', plan: 'off' })).toEqual({})
+    expect(overridesFrom({ spend: false, amber: '70', plan: 'off', shells: true })).toEqual({})
     expect(overridesFrom(undefined)).toEqual({})
     expect(overridesFrom(null)).toEqual({})
     expect(overridesFrom('settings')).toEqual({})

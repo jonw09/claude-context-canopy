@@ -146,7 +146,13 @@ const SCREENS = [
       main: { ...MAIN, tokens: 151_000, sent: 318_600, received: 18_400, activity: 'Bash: npm test' },
     }),
   },
-  { file: 'shells.png', title: 'Shells left running in the background', above: 'Started the dev server', v: view(SHELLS) },
+  { file: 'shells.png', title: 'Shells left running in the background, counted on their agents', above: 'Started the dev server', v: view(SHELLS) },
+  {
+    file: 'shells-rows.png',
+    title: '/canopy set shells rows',
+    above: 'Started the dev server',
+    v: view({ ...SHELLS, settings: settingsFrom({ shells: 'rows' }) }),
+  },
   { file: 'collapsed.png', title: 'Collapsed with /canopy', v: view({ ...TEAM, isCollapsed: true }) },
   { file: 'narrow.png', title: 'A narrow terminal (60 columns)', v: view({ ...TEAM, width: 60 }) },
   {
