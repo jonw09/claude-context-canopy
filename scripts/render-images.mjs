@@ -103,13 +103,8 @@ const CROWD = {
   maxRows: 11,
 }
 
-const ORGANISATION = {
-  limits: [],
-  planSplit: {},
-  sessionTokens: { opus: 210_000, sonnet: 80_000 },
-  usd: 18.4,
-  main: { ...MAIN, tokens: 52_000, sent: 196_000, received: 14_000, activity: 'Read infra/main.tf' },
-}
+// No window reported. The session and main keep the defaults, so the agents still add up to the session's tokens.
+const ORGANISATION = { limits: [], planSplit: {}, usd: 18.4 }
 
 // The README shows the first three at the top, in this order, and the rest further down.
 const SCREENS = [

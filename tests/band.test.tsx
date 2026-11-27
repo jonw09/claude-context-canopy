@@ -337,19 +337,20 @@ test('/clear starts the session figures over, and a resumed session picks its ow
   expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
 })
 
-test('the band asks nothing of the network, holds no login and hooks no tool call or agent spawn', async ($, on) => {
+test('the band asks for no login and makes no network request', async ($, on) => {
   const clock = engine(on, { agents: [{ id: 'r', type: 'reviewer', description: 'Review', status: 'running' }] })
   replies(on, () => [{ name: 'Bash', input: { command: 'npm test' } }])
+  // Each is only counted: neither hands the band anything it could use.
   let asked = 0
   on('session.authorize', () => {
     asked += 1
 
-    return { value: { handle: 'login', kind: 'bearer' as const } }
+    return { value: null }
   })
   on('http.fetch', () => {
     asked += 1
 
-    return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
+    return { value: { status: 404, ok: false, headers: {}, text: '' } }
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await step($)
@@ -360,11 +361,34 @@ test('the band asks nothing of the network, holds no login and hooks no tool cal
   expect((await $.command.run(canopy('status'))).text).not.toMatch(/[Ss]pend/)
 })
 
-test("an agent's first request brings it into the tree with its model, before the next poll", async ($, on) => {
+test("an agent's first request brings it into the tree with the model it asks for, before the next poll", async ($, on) => {
   engine(on, { agents: [{ id: 'r', type: 'reviewer', description: 'Review', status: 'running' }] })
-  replies(on, agentId => (agentId ? [{ name: 'Grep', input: { pattern: 'charge(', path: 'src/billing' } }] : []), 'claude-haiku-5-5')
+  // The reply is held open, so the band can be read while the agent's first request is under way.
+  let entered!: () => void
+  let release!: () => void
+  const inFlight = new Promise<void>(resolve => (entered = resolve))
+  const replied = new Promise<void>(resolve => (release = resolve))
+  on('turn.step', async function* (_, e) {
+    entered()
+    await replied
+
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses: [{ name: 'Grep', input: { pattern: 'charge(', path: 'src/billing' } }],
+      stopReason: 'tool_use' as const,
+      usage: { model: 'claude-haiku-5-5', input_tokens: 2_000, output_tokens: 1_000, cache_read_input_tokens: 50_000, cache_creation_input_tokens: 3_000 },
+    }
+  })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await step($, 'r', 'claude-haiku-5-5')
+  // Asked for Sonnet, served by Haiku.
+  const stepping = step($, 'r', 'claude-sonnet-5-5')
+  await inFlight
+  expect((await $.command.run(canopy('show 160'))).text).toMatch(/└─● reviewer +Sonnet 5\.5 /)
+  release()
+  await stepping
+  // Once the reply is in, the model that served it stands, and what it asks to run next.
   expect((await $.command.run(canopy('show 160'))).text).toMatch(/└─● reviewer +Haiku 5\.5 .*Grep "charge\(" in src\/billing/)
 })
 

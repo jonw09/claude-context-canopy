@@ -35,7 +35,7 @@ All of it is numbers: no prompts, file names, code or content.
 
 ## What it changes
 
-Nothing. Every event it hooks is passed on unchanged. It doesn't hook tool calls or agent spawns, and never blocks a tool, rewrites a prompt or a reply, or changes a setting, instruction or tool description.
+Nothing. Every event it hooks is passed on unchanged, except that it answers its own `/canopy` command and draws its band above the prompt. It doesn't hook tool calls or agent spawns, and never blocks a tool, rewrites a prompt or a reply, or changes a setting, instruction or tool description.
 
 ## What it adds
 

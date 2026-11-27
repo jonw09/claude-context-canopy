@@ -116,7 +116,7 @@ The 5-hour and 7-day windows appear after Claude's first reply, when they're fir
 | --- | --- |
 | Pro, Max, Team seats with usage limits | The 5-hour and 7-day windows |
 | A Claude gateway's spend limit | `month`: how much of the limit is used |
-| Enterprise and other seats billed by what they use, an API key, a cloud provider, or a gateway with no limit | `month` reading `not reported`, as Claude Code gives plugins no limit or spend for these. `/usage` shows what you've spent |
+| Enterprise and other seats billed by what they use, an API key, a cloud provider, or a gateway with no limit | `month` reading `not reported`, as Claude Code gives plugins no limit or spend for these. On Enterprise, Claude Code's own `/usage` shows what you've spent |
 
 ### Agents
 
@@ -165,7 +165,7 @@ The main row names your model from the start, and changes as soon as you switch 
 
 ![The collapsed band: one line with session totals, plan percentages, the agent count, one agent needing compaction and main at 37%](docs/images/collapsed.png)
 
-In a narrow terminal the band drops the bars and token counts, shortens model names, drops the pence from $1,000 and keeps every percentage in its column:
+In a narrow terminal the band drops the bars and token counts, shortens model names and keeps every percentage in its column:
 
 ![The band in a 60-column terminal, without bars, with percentages still in one column](docs/images/narrow.png)
 
@@ -221,26 +221,28 @@ If the band doesn't appear, run `/canopy status`. It lists which apps are attach
 
 ## Privacy
 
-Context Canopy keeps everything on your machine. It makes no network requests, reads no login, key or credential, calls no model, and sends nothing anywhere.
+Context Canopy keeps everything on your machine. It makes no network requests, reads no login, key or credential, calls no model, and sends nothing anywhere itself.
 
-To show what each agent is doing, it reads the tool calls in each of Claude's replies: the tool's name and its main argument (a file path, command or search). It holds that in memory for the session only. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
+To show what each agent is doing, it reads the last tool call in each of Claude's replies: the tool's name and its main argument (a file path, command or search). It holds that in memory for the session only. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
 
 ### What it fetches, runs and sends
 
 - **Fetches:** nothing. It makes no network request of any kind.
 - **Runs:** nothing. It runs no commands, starts no processes, and calls no tools or models. It doesn't hook tool calls or agent spawns, so it can't run, block or change one.
-- **Sends:** nothing, to anywhere. What it draws stays in the band, and `/canopy show` prints the band into your own conversation.
+- **Sends:** nothing, to anywhere. What it draws stays in the band. `/canopy show` prints the band into your own conversation, where Claude Code treats it like any other command's output.
 - **Credentials:** none. It never asks Claude Code for your login and reads no key, token or secret.
 
 ### What it hooks, and what it does with each
 
-Context Canopy is a mod: code that hooks events in Claude Code. It only reads what each event carries. It passes every event on unchanged, and changes no settings, instructions, tool descriptions or other hooks.
+Context Canopy is a mod: code that hooks events in Claude Code. It reads what each event carries, and asks Claude Code for the session's usage, model and version, and the list of running agents. It passes every event on unchanged, except that it answers its own `/canopy` command and draws its band above the prompt. It changes no settings, instructions, tool descriptions or other hooks.
 
 | Event | What it does |
 | --- | --- |
-| `session.start`, `session.end` | Loads and saves its numbers and settings on this machine, registers `/canopy`, reads Claude Code's version number so it draws the band in a way that version accepts, and starts and stops its timers |
-| `session.measure`, `turn.start`, `turn.complete` | Reads the session's model, token counts, cost and plan limits to draw the band |
-| `turn.step` | After each of Claude's replies, reads its model and token counts, and the name and main argument of the last tool call it asks for, to show what that agent is doing. The request and the reply pass on unchanged |
+| `session.start` | Loads its numbers and settings from this machine, registers `/canopy`, and reads Claude Code's version (so it draws the band in a way that version accepts), the session's model and its usage. Starts two timers: one that reads the list of running agents (each one's name, type, task description and status), the model and the usage every second, and one that saves its numbers every minute |
+| `session.end` | Saves its numbers on this machine |
+| `session.measure` | Reads the session's context size, auto-compact point, cost and plan limits |
+| `turn.start`, `turn.complete` | Shows `thinking…` beside an agent while it waits for a reply, and clears what it shows when the agent's turn ends. Reads only which agent it is |
+| `turn.step` | Before a helper agent's first request, notes the model it asks for and brings it into the tree. After each reply, reads its model and token counts, and the name and main argument of the last tool call it asks for, to show what that agent is doing. The request and the reply pass on unchanged |
 | `command.run` | Answers `/canopy` itself. Every other command passes through untouched |
 | `ui.render` | Draws the band above the prompt |
 

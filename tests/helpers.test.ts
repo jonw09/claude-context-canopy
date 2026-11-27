@@ -150,12 +150,11 @@ describe('estimate', () => {
 })
 
 describe('money', () => {
-  test('the session cost, with or without the pence', async () => {
+  test('the session cost, in dollars with the cents', async () => {
+    expect(money(0)).toBe('$0.00')
+    expect(money(4.5)).toBe('$4.50')
     expect(money(1082.62)).toBe('$1,082.62')
-    expect(money(1082.62, 'USD', false)).toBe('$1,083')
-    expect(money(2000, 'GBP', false)).toBe('£2,000')
-    expect(money(12.5, 'EUR')).toBe('€12.50')
-    expect(money(1234567.8, 'AUD')).toBe('AUD 1,234,567.80')
+    expect(money(1234567.8)).toBe('$1,234,567.80')
   })
 })
 

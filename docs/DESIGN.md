@@ -12,7 +12,7 @@ $.session.usage() every second      sessionAt              │
 turn.step (every model request) ─→  sessionTokens,         │
                                     loops[agent].tokens,   ├─→ layout.ts ─→ ui.render(AbovePrompt)
                                     sent, received         │
-turn.step's toolUses, turn.start ─→ loops[agent].activity │   buildLines()    └─ /canopy show (text)
+turn.step's toolUses, turn.start ─→ loops[agent].activity  │   buildLines()    └─ /canopy show (text)
   and turn.complete                                        │
 $.agent.list() every second     ─→  roster                 │
 $.session.model() every second  ─→  main.model            ─┘
@@ -32,7 +32,7 @@ session figures ─→ sessions ($.store) ─→ resume
 | `types/index.d.ts` | The `$.state` contract. |
 | `scripts/render-images.mjs` | Redraws the README screenshots from `layout.ts`. Not part of the plugin. |
 
-Every hook observes and calls `next(e)` unchanged. Work around `next` is wrapped so a failure in the band never affects a model request. The band hooks no tool call and no agent spawn, makes no network request and reads no credential (see [Plugin directory](#plugin-directory)).
+Every hook observes and calls `next(e)` unchanged, apart from `command.run` for `/canopy`, which it answers, and `ui.render` for `AbovePrompt`, which draws the band. Work around `next` is wrapped so a failure in the band never affects a model request. The band hooks no tool call and no agent spawn, makes no network request and reads no credential (see [Plugin directory](#plugin-directory)).
 
 ## Where the data comes from
 
@@ -60,7 +60,7 @@ Checked against the Claude Code 2.1.309 plugin API.
 - **No subagent window size.** 200k by default, 1M for `[1m]` models, or the main session's window when the model matches. Each agent's compaction point is its window scaled by the main session's compaction ratio.
 - **Teammates in their own terminal pane** run no loop in this process: status only, `—` for context.
 - **No plan name.** Claude Code doesn't tell plugins which plan you're on, so the row is headed **Plan Limits**. `$.session.identity()` gives the organisation's plan, but only to mods that organisation-managed settings install, and the directory reviews it as a credential read, so the plugin doesn't call it. The login file on disk was left alone too: it is undocumented, varies by platform and sits beside credentials.
-- **No spend in the plugin API.** `$.session.usage()` has no figure for what an account has spent this month. A gateway's `spend_limit` window comes as a percentage (past 100 once exceeded) and a reset time only, and the band draws it as it draws any window. Versions 0.2 and 0.3 read the month's spend with the request `/usage` makes (`$.session.authorize()` with `$.http.fetch`); that was removed because the plugin directory blocks a mod that reads a login and sends data out (see [Plugin directory](#plugin-directory)).
+- **No spend in the plugin API.** `$.session.usage()` has no figure for what an account has spent this month. A gateway's `spend_limit` window comes as a percentage (past 100 once exceeded) and a reset time only, and the band draws it as it draws any window. Versions 0.2.0 to 0.3.2 read the month's spend with the request `/usage` makes (`$.session.authorize()` with `$.http.fetch`); that was removed because the plugin directory blocks a mod that reads a login and sends data out (see [Plugin directory](#plugin-directory)).
 - **No limit reported.** With no window reported (Enterprise and other seats billed by use, an API key, a cloud provider, a gateway with no limit), once Claude has replied, and with no window seen this session (a window can lapse unread), the plan line shows `month` reading `not reported` alone. It doesn't say `unlimited`, as an Enterprise seat may well have a spend limit the plugin can't see. `$.session.identity()` would tell these apart, but only to mods that an organisation's managed settings install.
 - **No session limit.** A session has no limit of its own, so the band shows its cost alone, on the session line, for every plan.
 - **The mobile app on a cloud session attaches no drawing surface.** `$.session.surfaces()` is empty there, so nothing a plugin draws appears. `/canopy show` prints the band as text for that case.
@@ -81,7 +81,7 @@ Checked against the Claude Code 2.1.309 plugin API.
 - **The detail column opens with a two-cell gutter** for a sign: `≈` on an estimated split, `⚠` on an agent near compaction. Legends and each agent's `↑ sent ↓ received` counts start after it, in one column, and the agents' activity after the counts.
 - **Main counts from nothing**; another agent shows no counts until its first request, so teammates in their own pane, whose usage this session can't see, show none.
 - **Each model keeps one slot in every legend**, sized to its name and a right-aligned percentage, so `■ Sonnet` sits in the same column on every row. A row that lacks a model leaves its slot blank. Models drop from the right when the room runs out.
-- **Narrow layouts** (under 72 columns) drop the bars and token counts, shorten model names, and drop the pence from $1,000 so an amount fits its column. Legends and activity take what room is left, item by item.
+- **Narrow layouts** (under 72 columns) drop the bars and token counts and shorten model names. Legends and activity take what room is left, item by item.
 - **Tall trees are cut to fit** `maxRows`, less the rows the margin, session and plan take, keeping main. The last row says how many agents it hides, and how many of those are near compacting. `/canopy show` has no height, so it prints the whole tree.
 
 ## Testing

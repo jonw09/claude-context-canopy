@@ -5,13 +5,11 @@ export function tokens(n: number): string {
   return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 2 : 1)}M`
 }
 
-const SYMBOL: Record<string, string> = { USD: '$', GBP: '£', EUR: '€' }
+/** The session's cost, which Claude Code gives in dollars: `$1,082.62`. */
+export function money(n: number): string {
+  const [whole = '0', fraction = '00'] = n.toFixed(2).split('.')
 
-/** `$1,082.62`, or `$1,083` without the pence. */
-export function money(n: number, currency = 'USD', pence = true): string {
-  const [whole = '0', fraction] = (pence ? n.toFixed(2) : Math.round(n).toString()).split('.')
-
-  return `${SYMBOL[currency] ?? `${currency} `}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction === undefined ? '' : `.${fraction}`}`
+  return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction}`
 }
 
 /** Time left until `iso`: `38m`, `2h14m`, `4d06h`. */
