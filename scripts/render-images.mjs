@@ -99,11 +99,13 @@ const CROWD = {
     p: { model: 'claude-haiku-5-5', tokens: 22_000, sent: 19_800, received: 1_300, activity: 'Bash: npm run bench' },
     l: { model: 'claude-haiku-5-5', tokens: 12_000, sent: 11_400, received: 900, activity: 'Bash: npm run lint' },
   },
+  // Sent and received add up to these: 337k Opus (main) and 105.5k (migration-planner), 371.9k Sonnet, 118.4k Haiku.
+  sessionTokens: { opus: 442_500, sonnet: 371_900, haiku: 118_400 },
   // The band's own rows, less the blank row above it, as the plugin counts them.
   maxRows: 11,
 }
 
-// No window reported. The session and main keep the defaults, so the agents still add up to the session's tokens.
+// No window reported.
 const ORGANISATION = { limits: [], planSplit: {}, usd: 18.4 }
 
 // The README shows the first three at the top, in this order, and the rest further down.
