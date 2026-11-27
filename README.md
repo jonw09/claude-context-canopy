@@ -4,11 +4,11 @@
 
 # Context Canopy
 
-Your session, plan limits and spend, and every running agent, in one band above the Claude Code prompt.
+Your session, plan limits and every running agent, in one band above the Claude Code prompt.
 
 </div>
 
-**A new session.** Your model shows straight away. The 5-hour and 7-day windows appear after Claude's first reply, and an Enterprise month's spend as soon as it's read.
+**A new session.** Your model shows straight away. The 5-hour and 7-day windows appear after Claude's first reply.
 
 ![A new session before the first reply: no tokens yet, the plan line waiting for the first reply, and main on Opus 5.5, ready](docs/images/initial.png)
 
@@ -16,25 +16,21 @@ Your session, plan limits and spend, and every running agent, in one band above 
 
 ![The band on Pro or Max: the session by model, 5h and 7d windows, and a tree of agents cut to fit, ending with 3 more agents, 1 of them near compacting](docs/images/band.png)
 
-**Enterprise with a spend limit.** What you've spent this month, laid out like the session's cost, then how much of your limit that is. The figure is your account's own, as `/usage` and claude.ai show it.
+**Enterprise, an API key or a cloud provider.** Claude Code reports no plan limit for these, so the plan line says `not reported`. The session's cost and every agent show as usual.
 
-![The band with a spend limit: the session at $18.40, then the month at $1,082.62, 54% of $2,000, resetting in 10 days, and a tree of agents cut to fit](docs/images/enterprise.png)
-
-**Enterprise with no spend limit.** What you've spent this month, with `unlimited` where the bar would be.
-
-![The band with no spend limit: the session at $18.40, then the month at $1,082.62 reading unlimited, and a tree of agents cut to fit](docs/images/unlimited.png)
+![The band with no limit reported: the session at $18.40, the plan line reading month, not reported, and a tree of agents cut to fit](docs/images/no-limit.png)
 
 ## What it shows
 
 | Line | What you see |
 | --- | --- |
 | **Session** | Tokens and cost for this session, and each model's share |
-| **Plan** | Your plan's limits: how full each is, when it resets, and an estimate of which models used it. On Pro and Max that's the 5-hour and 7-day windows. On Enterprise, what you've spent this month and how much of your spend limit that is |
+| **Plan** | Your plan's limits: how full each is, when it resets, and an estimate of which models used it. On Pro and Max that's the 5-hour and 7-day windows |
 | **Agents** | Every running agent as a tree, however deep: its model, how full its context is, the tokens it has sent and received, and what it is doing right now |
 
 Two rules keep it quick to read:
 
-- **A bar always means how full something is**, a plan window, a spend limit or an agent's context, and its colour is always its health: green, then amber, then red. Its percentage sits next to it in the same colour.
+- **A bar always means how full something is**, a plan window or an agent's context, and its colour is always its health: green, then amber, then red. Its percentage sits next to it in the same colour.
 - **Model colours only name models**, never fill a bar: **Fable** violet, **Opus** magenta, **Sonnet** blue, **Haiku** cyan, on model names and the `■` shares.
 
 ## Install
@@ -114,26 +110,13 @@ The 5-hour and 7-day windows appear after Claude's first reply, when they're fir
 
 **The row's name.** Claude Code doesn't tell plugins which plan you're on, so the row is headed **Plan Limits**.
 
-**Team, Enterprise and API keys.** What the line shows depends on what Claude reports for your account:
+**Team, Enterprise and API keys.** What the line shows depends on what Claude Code reports for your account:
 
 | Account | What the plan line shows |
 | --- | --- |
-| Pro, Max, Team seats with usage limits | The 5-hour and 7-day windows, and with extra usage turned on, an `extra` row for it |
-| Enterprise, and other seats billed by what they use | `month`: what you've spent this billing period, how much of your spend limit that is, and the limit. With no spend limit, `unlimited` where the bar would be |
-| A Claude gateway's spend limit | `month`: how much of the limit is used. A gateway reports no amounts |
-| An API key, a cloud provider, or a gateway with no limit | `month` reading `unlimited` |
-
-**Where the month's spend comes from.** It's your account's own figure for the billing period, read from Anthropic just as Claude Code's `/usage` reads it, so it counts every device and claude.ai too. It resets on the 1st. The band asks for it when a session starts, every five minutes, and after Claude replies (at most once a minute). This is the plugin's only network request: Claude Code signs it with your login, and the plugin never sees your credentials. [PRIVACY.md](PRIVACY.md) has the details, and `/canopy set spend off` turns it off.
-
-A spend row goes past 100% if you go over your limit, and reads `limited` when it does.
-
-With extra usage on Pro or Max, the `extra` row sits under the windows it tops up:
-
-![Pro or Max with extra usage: the 5h and 7d windows, then extra at $12.30, 25% of $50](docs/images/extra.png)
-
-With an API key or a cloud provider, there's no limit or spend to read:
-
-![An API key: the plan line reads month, unlimited](docs/images/no-limit.png)
+| Pro, Max, Team seats with usage limits | The 5-hour and 7-day windows |
+| A Claude gateway's spend limit | `month`: how much of the limit is used |
+| Enterprise and other seats billed by what they use, an API key, a cloud provider, or a gateway with no limit | `month` reading `not reported`, as Claude Code gives plugins no limit or spend for these. `/usage` shows what you've spent |
 
 ### Agents
 
@@ -176,7 +159,7 @@ The main row names your model from the start, and changes as soon as you switch 
 | `/canopy collapse` / `/canopy expand` | Set it one way |
 | `/canopy show` | Print the band as text (for places that can't draw it, see below) |
 | `/canopy show 80` | The same, at a set width |
-| `/canopy status` | Check whether the band can be drawn here, when your spend was last read, and any error |
+| `/canopy status` | Check whether the band can be drawn here, and any error |
 | `/canopy set …` | Change a setting (see [Settings](#settings)) |
 | `/canopy reset` | Put every setting back to its default |
 
@@ -198,7 +181,6 @@ There's nothing to set up: the defaults suit most people. To change one, use `/c
 | `/canopy set session off` | on | The session line |
 | `/canopy set agents off` | on | The agent tree |
 | `/canopy set split off` | on | The `≈` model shares on the plan line |
-| `/canopy set spend off` | on | Reading your spend this month from Anthropic, and the row that shows it (see [Privacy](#privacy)) |
 
 For example, to keep only the agent tree:
 
@@ -235,33 +217,34 @@ If the band doesn't appear, run `/canopy status`. It lists which apps are attach
 - **How tokens are counted.** Fresh input, output and cache writes count in full. Cache reads count at a tenth, which is how they're priced, so the totals reflect real usage rather than the same context re-read on every request. Each agent's ↑ sent and ↓ received counts work the same way.
 - **Subagent windows.** Agents get a 200k context window, or 1M for `[1m]` models, unless they run on the same model as the main session.
 - **Teammates in their own pane** show in the tree with `—` for context, because their usage isn't visible to this session.
-- **The month's spend relies on the request `/usage` makes**, which isn't a published API. If Anthropic changes it, the band can't read your spend: the month then reads `unlimited` with no amount until the plugin is updated, and `/canopy status` says what Anthropic answered.
 - **Claude Code updates.** Context Canopy uses Claude Code's plugin API, which is still in early access, so a Claude Code update can occasionally break the band. If it disappears, run `/canopy status`, update the plugin, and [report a problem](https://github.com/jonw09/claude-context-canopy/issues) if that doesn't fix it.
 
 ## Privacy
 
-Context Canopy keeps everything on your machine, with one exception: it asks Anthropic what your account has spent this month, the same request Claude Code's own `/usage` makes. Claude Code signs that request with your login and sends it to Anthropic alone, and the plugin never sees your credentials. It sends nothing about your work. `/canopy set spend off` stops it.
+Context Canopy keeps everything on your machine. It makes no network requests, reads no login, key or credential, calls no model, and sends nothing anywhere.
 
-Otherwise it calls no model, sends nothing anywhere and changes nothing: every event it hooks is passed on unchanged. To show what each agent is doing, it reads the tool each agent calls and that call's main argument (a file path, command or search), and holds it in memory for the session only. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
+To show what each agent is doing, it reads the tool calls in each of Claude's replies: the tool's name and its main argument (a file path, command or search). It holds that in memory for the session only. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
+
+### What it fetches, runs and sends
+
+- **Fetches:** nothing. It makes no network request of any kind.
+- **Runs:** nothing. It runs no commands, starts no processes, and calls no tools or models. It doesn't hook tool calls or agent spawns, so it can't run, block or change one.
+- **Sends:** nothing, to anywhere. What it draws stays in the band, and `/canopy show` prints the band into your own conversation.
+- **Credentials:** none. It never asks Claude Code for your login and reads no key, token or secret.
 
 ### What it hooks, and what it does with each
 
-Context Canopy is a mod: code that hooks events in Claude Code. It never blocks, changes or runs anything, and passes every event on unchanged.
+Context Canopy is a mod: code that hooks events in Claude Code. It only reads what each event carries. It passes every event on unchanged, and changes no settings, instructions, tool descriptions or other hooks.
 
 | Event | What it does |
 | --- | --- |
-| `session.start`, `session.end` | Loads and saves its numbers and settings, registers `/canopy`, and starts and stops its timers |
-| `session.measure`, `turn.start`, `turn.step`, `turn.complete` | Reads the session's model, token counts, cost and plan limits to draw the band. After a reply it may ask Anthropic for the month's spend (at most once a minute) |
-| `tool.call` | Reads the tool's name and main argument (a file path, command, search or site) to show what an agent is doing, and holds it in memory. The hook changes nothing: the call goes ahead untouched, and the plugin doesn't run it, block it or alter it |
-| `agent.spawn` | Reads the new agent's id and model. The hook changes nothing: the spawn goes ahead untouched, with the agent's settings, instructions and tools as they were |
+| `session.start`, `session.end` | Loads and saves its numbers and settings on this machine, registers `/canopy`, reads Claude Code's version number so it draws the band in a way that version accepts, and starts and stops its timers |
+| `session.measure`, `turn.start`, `turn.complete` | Reads the session's model, token counts, cost and plan limits to draw the band |
+| `turn.step` | After each of Claude's replies, reads its model and token counts, and the name and main argument of the last tool call it asks for, to show what that agent is doing. The request and the reply pass on unchanged |
 | `command.run` | Answers `/canopy` itself. Every other command passes through untouched |
 | `ui.render` | Draws the band above the prompt |
 
-It runs no commands, starts no processes and calls no tools or models of its own.
-
-**What it sends, and where.** One fixed address, `https://api.anthropic.com/api/oauth/usage`, and nothing else. The request has no body: nothing from your conversation, tool calls or files goes with it. The plugin never reads your credential. It asks Claude Code for a handle to the login, and Claude Code attaches the credential itself, for Anthropic's own servers only. The reply is your account's spend figures, which stay in memory. `/canopy set spend off` stops the request.
-
-[PRIVACY.md](PRIVACY.md) sets out exactly what it reads, sends, keeps and adds.
+[PRIVACY.md](PRIVACY.md) sets out exactly what it reads, keeps and adds.
 
 ## Update or remove
 

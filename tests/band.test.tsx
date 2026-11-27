@@ -1,5 +1,5 @@
-import type { AgentInfo, CommandRunInput, HttpInit, On, SessionUsage } from 'claude-code'
-import { expect, mock, test } from 'claude-code/testing'
+import type { AgentInfo, CommandRunInput, On, SessionUsage, TurnStepToolUse } from 'claude-code'
+import { type Engine, expect, mock, test } from 'claude-code/testing'
 
 const BAND = {
   plugin: 'context-canopy',
@@ -37,7 +37,12 @@ const canopy = (args: string): CommandRunInput => ({
 /** Stands in for the engine beneath the plugin, and starts the session. `usage` may be read afresh on each call. */
 function engine(
   on: On,
-  { usage = USAGE as SessionUsage | (() => SessionUsage), agents = [] as Partial<AgentInfo>[], version = '2.1.332' } = {},
+  {
+    usage = USAGE as SessionUsage | (() => SessionUsage),
+    agents = [] as Partial<AgentInfo>[],
+    version = '2.1.332',
+    stored = {} as Record<string, unknown>,
+  } = {},
 ) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.version', () => ({ value: { version, base: version } }))
@@ -46,9 +51,32 @@ function engine(
   on('agent.list', () => ({ value: agents as AgentInfo[] }))
   on('session.surfaces', () => ({ value: [] }))
   const clock = mock.clock(on, { now: Date.parse('2026-10-21T10:00:00Z') })
-  mock.store(on)
+  mock.store(on, stored)
 
   return clock
+}
+
+/** Stands in for the model: each reply asks for the tool calls `uses` gives for the agent, served by `model`. */
+function replies(on: On, uses: (agentId?: string) => TurnStepToolUse[] = () => [], model = 'claude-sonnet-5-5') {
+  on('turn.step', async function* (_, e) {
+    const toolUses = uses(e.agentId)
+
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses,
+      stopReason: toolUses.length ? ('tool_use' as const) : ('end_turn' as const),
+      usage: { model, input_tokens: 2_000, output_tokens: 1_000, cache_read_input_tokens: 50_000, cache_creation_input_tokens: 3_000 },
+    }
+  })
+}
+
+/** Runs one model request to its end, for `agentId` or main. */
+async function step($: Engine, agentId?: string, model = 'claude-sonnet-5-5'): Promise<void> {
+  for await (const _ of $.turn.step({ turnId: `t-${agentId ?? 'main'}`, index: 0, model, messageCount: 1, ...(agentId ? { agentId } : {}) })) {
+    // drain the stream
+  }
 }
 
 test('the band shows plan, session and the agent tree on terminal and desktop', async ($, on) => {
@@ -58,11 +86,12 @@ test('the band shows plan, session and the agent tree on terminal and desktop', 
       { id: 'x', parentId: 'r', type: 'Explore', description: 'Find callers', status: 'running' },
     ],
   })
-  on('tool.call', () => ({ result: {} }))
+  replies(on, agentId => (agentId ? [] : [{ name: 'Read', input: { file_path: '/src/a.ts' } }, { name: 'Bash', input: { command: 'npm test' } }]))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   // The band polls the agent list each second.
   await clock.advance(1000)
-  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  // What main is doing comes from its reply: the last tool call it asks for.
+  await step($)
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
@@ -293,7 +322,7 @@ test('/clear starts the session figures over, and a resumed session picks its ow
     // drain the stream
   }
   expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
-  expect(await show()).toMatch(/Plan Limits +month +unlimited/)
+  expect(await show()).toMatch(/Plan Limits +month +not reported/)
   expect(await show()).toMatch(/● main .*↑20k +↓1k/)
 
   // `/clear`: Claude Code starts a new session and its cost over, and raises no measure event for it.
@@ -308,68 +337,42 @@ test('/clear starts the session figures over, and a resumed session picks its ow
   expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
 })
 
-/** Stands in for Anthropic's usage endpoint: what the account has spent, in cents, or a failure. */
-function anthropic(on: On, reply: () => { status: number; usedCents?: number; limitCents?: number | null }) {
-  const asked: { url: string; init?: HttpInit }[] = []
-  on('session.authorize', () => ({ value: { handle: 'login', kind: 'bearer' as const } }))
-  on('http.fetch', (_, e) => {
-    asked.push({ url: e.url, init: e.init })
-    const { status, usedCents = 0, limitCents = null } = reply()
-    const extra = { is_enabled: true, monthly_limit: limitCents, used_credits: usedCents, utilization: limitCents ? (usedCents / limitCents) * 100 : null }
+test('the band asks nothing of the network, holds no login and hooks no tool call or agent spawn', async ($, on) => {
+  const clock = engine(on, { agents: [{ id: 'r', type: 'reviewer', description: 'Review', status: 'running' }] })
+  replies(on, () => [{ name: 'Bash', input: { command: 'npm test' } }])
+  let asked = 0
+  on('session.authorize', () => {
+    asked += 1
 
-    return { value: { status, ok: status < 300, headers: {}, text: JSON.stringify({ five_hour: null, seven_day: null, extra_usage: extra }) } }
+    return { value: { handle: 'login', kind: 'bearer' as const } }
   })
-
-  return asked
-}
-
-test("the month's spend is read from Anthropic with the session's own login, every five minutes", async ($, on) => {
-  const clock = engine(on, { usage: { ...USAGE, rateLimits: [] } as SessionUsage })
-  let reply = { status: 200, usedCents: 108_262 }
-  const asked = anthropic(on, () => reply)
-  const show = async (): Promise<string> => (await $.command.run(canopy('show 100'))).text ?? ''
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-
-  // Before the first reply: the spend needs none.
-  expect(await show()).toMatch(/Plan Limits +month +↻ \S+ +\$1,082\.62 +unlimited/)
-  expect(asked).toEqual([{ url: 'https://api.anthropic.com/api/oauth/usage', init: { auth: 'login', headers: { 'anthropic-beta': 'oauth-2025-04-20' } } }])
-
-  reply = { status: 200, usedCents: 120_000 }
-  await clock.advance(5 * 60_000)
-  expect(await show()).toMatch(/\$1,200\.00 +unlimited/)
-
-  // A failed read keeps the last one.
-  reply = { status: 503, usedCents: 0 }
-  await clock.advance(5 * 60_000)
-  expect(await show()).toMatch(/\$1,200\.00 +unlimited/)
-  expect((await $.command.run(canopy('status'))).text).toMatch(/Spend this month: Anthropic answered 503/)
-})
-
-test('/canopy set spend off stops asking and takes the spend away', async ($, on) => {
-  const clock = engine(on, { usage: { ...USAGE, rateLimits: [] } as SessionUsage })
-  const asked = anthropic(on, () => ({ status: 200, usedCents: 5_000, limitCents: 20_000 }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await $.command.run(canopy('show 100'))).text).toMatch(/month +↻ \S+ +\$50\.00 +▆+ +25% +of \$200/)
-
-  await $.command.run(canopy('set spend off'))
-  await clock.advance(15 * 60_000)
-  expect(asked).toHaveLength(1)
-  expect((await $.command.run(canopy('show 100'))).text).not.toMatch(/\$50/)
-  expect((await $.command.run(canopy('status'))).text).toMatch(/Spend this month: off/)
-})
-
-test('without a claude.ai login, nothing is asked', async ($, on) => {
-  engine(on)
-  let fetched = 0
-  on('session.authorize', () => ({ value: null }))
   on('http.fetch', () => {
-    fetched += 1
+    asked += 1
 
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(fetched).toBe(0)
-  expect((await $.command.run(canopy('status'))).text).toMatch(/Spend this month: not available without a claude\.ai login/)
+  await step($)
+  await step($, 'r')
+  for (const command of ['', 'expand', 'status', 'show 100', 'set split off', 'reset']) await $.command.run(canopy(command))
+  await clock.advance(60 * 60_000)
+  expect(asked).toBe(0)
+  expect((await $.command.run(canopy('status'))).text).not.toMatch(/[Ss]pend/)
+})
+
+test("an agent's first request brings it into the tree with its model, before the next poll", async ($, on) => {
+  engine(on, { agents: [{ id: 'r', type: 'reviewer', description: 'Review', status: 'running' }] })
+  replies(on, agentId => (agentId ? [{ name: 'Grep', input: { pattern: 'charge(', path: 'src/billing' } }] : []), 'claude-haiku-5-5')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await step($, 'r', 'claude-haiku-5-5')
+  expect((await $.command.run(canopy('show 160'))).text).toMatch(/└─● reviewer +Haiku 5\.5 .*Grep "charge\(" in src\/billing/)
+})
+
+test('a spend setting an earlier version saved is dropped', async ($, on) => {
+  engine(on, { stored: { settings: { spend: false, plan: false } } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await $.command.run(canopy('set split off'))).text).toBe('Context Canopy settings: plan off, split off.')
+  expect((await $.command.run(canopy('set spend on'))).text).toMatch(/^Use \/canopy set amber\|red <percent>, \/canopy set plan\|session\|agents\|split on\|off/)
 })
 
 test('/canopy set changes a setting for later sessions, and reset puts the defaults back', async ($, on) => {

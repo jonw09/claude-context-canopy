@@ -8,8 +8,6 @@ export type Settings = {
   showSession: boolean
   showAgents: boolean
   estimate: boolean
-  /** Whether to ask Anthropic for the account's spend this month. */
-  fetchSpend: boolean
 }
 
 const clamp = (n: number, low: number, high: number): number => Math.min(Math.max(n, low), high)
@@ -24,14 +22,26 @@ export function settingsFrom(o: Overrides): Settings {
     showSession: o.session ?? true,
     showAgents: o.agents ?? true,
     estimate: o.split ?? true,
-    fetchSpend: o.spend ?? true,
   }
 }
 
 /** Reads `amber 70` or `split off`; anything else is undefined. */
 export function overrideFrom(key = '', value = ''): Overrides | undefined {
   if ((key === 'amber' || key === 'red') && /^\d+$/.test(value)) return { [key]: Number(value) }
-  if (['plan', 'session', 'agents', 'split', 'spend'].includes(key) && /^(on|off)$/.test(value)) return { [key]: value === 'on' }
+  if (['plan', 'session', 'agents', 'split'].includes(key) && /^(on|off)$/.test(value)) return { [key]: value === 'on' }
 
   return undefined
+}
+
+/**
+ * The saved settings, keeping only those this version has. An earlier version
+ * saved `spend`, which no longer means anything, so it is dropped.
+ */
+export function overridesFrom(saved: unknown): Overrides {
+  const all = typeof saved === 'object' && saved !== null ? (saved as Record<string, unknown>) : {}
+  const out: Record<string, number | boolean> = {}
+  for (const key of ['amber', 'red'] as const) if (typeof all[key] === 'number') out[key] = all[key]
+  for (const key of ['plan', 'session', 'agents', 'split'] as const) if (typeof all[key] === 'boolean') out[key] = all[key]
+
+  return out as Overrides
 }
