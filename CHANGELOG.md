@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/jonw09/claude-context-canopy/compare/v0.4.0...v0.5.0) (2026-11-27)
+
+
+### Features
+
+* count the background shells each agent leaves running on its row, or list them with /canopy set shells rows ([9c83381](https://github.com/jonw09/claude-context-canopy/commit/9c833819eb99daaddbe44868e7a302e349834cc4))
+* name the plan on the plan line when no limit is reported: see /usage on Enterprise, no plan limit for an API key or cloud provider ([9c83381](https://github.com/jonw09/claude-context-canopy/commit/9c833819eb99daaddbe44868e7a302e349834cc4))
+* split the session and plan bars by model, keep context bars as health gauges, and colour percentages only when they need a look ([9c83381](https://github.com/jonw09/claude-context-canopy/commit/9c833819eb99daaddbe44868e7a302e349834cc4))
+
+
+### Bug Fixes
+
+* redraw the band each minute so shell run times and window resets keep moving ([9c83381](https://github.com/jonw09/claude-context-canopy/commit/9c833819eb99daaddbe44868e7a302e349834cc4))
+
 ## [0.4.0](https://github.com/jonw09/claude-context-canopy/compare/v0.3.2...v0.4.0) (2026-11-27)
 
 
