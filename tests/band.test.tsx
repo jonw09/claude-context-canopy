@@ -353,6 +353,10 @@ test('the band asks for no login and makes no network request', { timeoutMs: 20_
 
     return { value: { status: 404, ok: false, headers: {}, text: '' } }
   })
+  // A shell call and its answer, so the read for shells runs too.
+  on('session.messages', () => ({
+    value: [{ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'u1', tool: 'Bash', input: DEV, text: 'Command running in background with ID: b1.' }], uuid: 'a1' }] as never,
+  }))
   // Every event the band hooks, so a request added to any of them is caught: turn.complete is where the removed spend request ran.
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => e as never)
@@ -366,12 +370,15 @@ test('the band asks for no login and makes no network request', { timeoutMs: 20_
     await $.turn.complete({ ...ids, answer: '', durationMs: 1, isAborted: false, reason: 'end_turn', text: '' } as never)
   }
   await $.session.measure({ context: USAGE.context, rateLimits: USAGE.rateLimits, cost: USAGE.cost, changed: ['rateLimits', 'cost'] })
+  await (await $.ui.mount(WELCOME)).unmount()
   for (const surface of ['terminal', 'desktop'] as const) await (await $.ui.mount({ ...BAND, surface })).unmount()
-  for (const command of ['', 'expand', 'status', 'show 100', 'set split off', 'reset']) await $.command.run(canopy(command))
+  for (const command of ['', 'expand', 'status', 'show 100', 'set split off', 'set shells rows', 'reset']) await $.command.run(canopy(command))
   await clock.advance(60 * 60_000)
   await $.session.end({ reason: 'other' } as never)
   expect(asked).toBe(0)
   expect((await $.command.run(canopy('status'))).text).not.toMatch(/[Ss]pend/)
+  // The shell read ran, and still nothing was fetched or asked for.
+  expect((await $.command.run(canopy('show 120'))).text).toMatch(/Start dev server/)
 })
 
 test("an agent's first request brings it into the tree with the model it asks for, before the next poll", async ($, on) => {
@@ -556,4 +563,64 @@ test("a subagent's shells go when it does, and /canopy set shells off reads and 
   agents[0]!.status = 'completed'
   await clock.advance(1000)
   expect(await show()).not.toMatch(/Start dev server|reviewer/)
+})
+
+test('off the terminal, the session bar, shell counts and rows, and the plan line keep to the cell grid, their columns in line', async ($, on) => {
+  const clock = engine(on, {
+    usage: { ...USAGE, rateLimits: [] } as SessionUsage,
+    agents: [{ id: 'r', type: 'reviewer', description: 'Review', status: 'running' }],
+  })
+  const started = 'Command running in background with ID: b1.'
+  on('session.messages', (_, e) => ({
+    value: [
+      { role: 'assistant', text: '', toolUses: [{ tool_use_id: `u-${(e as { agentId?: string }).agentId ?? 'main'}`, tool: 'Bash', input: DEV, text: started }], uuid: 'a1' },
+    ] as never,
+  }))
+  replies(on, () => [{ name: 'Bash', input: DEV }])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await (await $.ui.mount(WELCOME)).unmount()
+  await clock.advance(1000)
+  await step($)
+  await step($, 'r')
+
+  for (const mode of ['count', 'rows']) {
+    await $.command.run(canopy(`set shells ${mode}`))
+    for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      const rows = (((await ui.drawn()) as unknown as Drawn).children ?? []) as Drawn[]
+      const text = rows.map(textOf)
+      expect(text.join('\n')).toMatch(mode === 'count' ? /\$1  / : /└─\$ Start dev server · npm run dev · 0m/)
+      expect(text.join('\n')).toMatch(/Plan Limits  Enterprise +see \/usage/)
+      for (const line of rows) {
+        let cells = 0
+        for (const part of (line.children ?? []) as Drawn[]) {
+          const t = textOf(part)
+          if (part.type === 'Box') expect(part.props?.width).toBe(t.length)
+          else expect(t).toMatch(/^[\x20-\x7e]+$/)
+          cells += t.length
+        }
+        expect(cells).toBeLessThanOrEqual(BAND.props.bodyColumns)
+      }
+      // Each glyph run holds to its cells, so where a row's bar starts in its text is where it is drawn: one column for the session, plan and every agent.
+      expect(text.filter(t => t.includes('▆')).length).toBeGreaterThanOrEqual(3)
+      expect(new Set(text.filter(t => t.includes('▆')).map(t => t.indexOf('▆'))).size).toBe(1)
+      await ui.unmount()
+    }
+  }
+})
+
+test('a drawn band redraws each minute, so how long a shell has run and when a window resets keep moving', async ($, on) => {
+  const clock = engine(on)
+  on('session.messages', () => ({
+    value: [{ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'u1', tool: 'Bash', input: DEV, text: 'Command running in background with ID: b1.' }], uuid: 'a1' }] as never,
+  }))
+  replies(on, () => [{ name: 'Bash', input: DEV }])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(canopy('set shells rows'))
+  await step($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Start dev server · npm run dev · 0m/ })).toBeDefined()
+  await clock.advance(3 * 60_000)
+  expect(await ui.find({ type: 'Text', text: /Start dev server · npm run dev · 3m/ })).toBeDefined()
+  await ui.unmount()
 })

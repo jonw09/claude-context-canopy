@@ -42,7 +42,7 @@ Nothing. Every event it hooks is passed on unchanged, except that it answers its
 
 ## What it adds
 
-The `/canopy` command, which it answers itself. It adds no tools and no agents, handles no other command and calls no model. `/canopy show` prints the band as text into your conversation, activity included, so it becomes part of the session like any other command output. Nothing else the plugin draws enters the conversation.
+The `/canopy` command, which it answers itself. It adds no tools and no agents, handles no other command and calls no model. `/canopy show` prints the band as text into your conversation, activity and background shells' commands included, so it becomes part of the session like any other command output. Nothing else the plugin draws enters the conversation.
 
 ## Turning things off
 

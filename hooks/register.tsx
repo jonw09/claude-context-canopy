@@ -340,7 +340,11 @@ export const register: Register = on => {
     for (const timer of timers) timer.cancel()
     timers = [
       $.clock.every(1000, () => void quietly(Promise.all([pollAgents($), followModel($), followUsage($), followPlan($)]))),
-      $.clock.every(60_000, () => void quietly(flush($))),
+      $.clock.every(60_000, () => {
+        void quietly(flush($))
+        // Times the band counts in minutes (a window's reset, how long a shell has run) move with no change of state.
+        $.ui.invalidate('ui.render')
+      }),
     ]
 
     return started

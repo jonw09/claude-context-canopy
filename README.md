@@ -261,11 +261,11 @@ To show what each agent is doing, it reads the last tool call in each of Claude'
 
 ### What it hooks, and what it does with each
 
-Context Canopy is a mod: code that hooks events in Claude Code. It reads what each event carries, and asks Claude Code for the session's usage, model and version, and the list of running agents. It passes every event on unchanged, except that it answers its own `/canopy` command and draws its band above the prompt. It changes no settings, instructions, tool descriptions or other hooks.
+Context Canopy is a mod: code that hooks events in Claude Code. It reads what each event carries, and asks Claude Code for the session's usage, model and version, the list of running agents, and, while an agent has a background shell running or has just asked for one, that agent's newest conversation rows. It passes every event on unchanged, except that it answers its own `/canopy` command and draws its band above the prompt. Once a minute it asks Claude Code to redraw the band, so the times in it keep moving. It changes no settings, instructions, tool descriptions or other hooks.
 
 | Event | What it does |
 | --- | --- |
-| `session.start` | Loads its numbers and settings from this machine, registers `/canopy`, and reads Claude Code's version (so it draws the band in a way that version accepts), the session's model and its usage. Starts two timers: one that reads the list of running agents (each one's name, type, task description and status), the model and the usage every second, and one that saves its numbers every minute |
+| `session.start` | Loads its numbers and settings from this machine, registers `/canopy`, and reads Claude Code's version (so it draws the band in a way that version accepts), the session's model and its usage. Starts two timers: one that reads the list of running agents (each one's name, type, task description and status), the model and the usage every second, and one that saves its numbers and redraws the band every minute |
 | `session.end` | Saves its numbers on this machine |
 | `session.measure` | Reads the session's context size, auto-compact point, cost and plan limits |
 | `turn.start`, `turn.complete` | Shows `thinking…` beside an agent while it waits for a reply, and clears what it shows when the agent's turn ends. At the start of a turn, looks in its text for a notice that a background shell has finished |
