@@ -352,11 +352,23 @@ test('the band asks for no login and makes no network request', async ($, on) =>
 
     return { value: { status: 404, ok: false, headers: {}, text: '' } }
   })
+  // Every event the band hooks, so a request added to any of them is caught: turn.complete is where the removed spend request ran.
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => e as never)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('session.end', () => ({ sessionId: 's' }) as never)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await step($)
-  await step($, 'r')
+  for (const agentId of [undefined, 'r']) {
+    const ids = { turnId: `t-${agentId ?? 'main'}`, ...(agentId ? { agentId } : {}) }
+    await $.turn.start({ text: 'go', ...ids })
+    await step($, agentId)
+    await $.turn.complete({ ...ids, answer: '', durationMs: 1, isAborted: false, reason: 'end_turn', text: '' } as never)
+  }
+  await $.session.measure({ context: USAGE.context, rateLimits: USAGE.rateLimits, cost: USAGE.cost, changed: ['rateLimits', 'cost'] })
+  for (const surface of ['terminal', 'desktop'] as const) await (await $.ui.mount({ ...BAND, surface })).unmount()
   for (const command of ['', 'expand', 'status', 'show 100', 'set split off', 'reset']) await $.command.run(canopy(command))
   await clock.advance(60 * 60_000)
+  await $.session.end({ reason: 'other' } as never)
   expect(asked).toBe(0)
   expect((await $.command.run(canopy('status'))).text).not.toMatch(/[Ss]pend/)
 })
