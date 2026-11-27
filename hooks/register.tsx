@@ -1,12 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionUsage, Timer, TurnUsage } from 'claude-code'
 
-import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides } from '../types'
+import type { AgentRow, FamilyTokens, LimitWindow, LoopLive, MainContext, Overrides, ShellWatch } from '../types'
 import { type SessionLog, type UsageLog, addTo, hourOf, keepSessions, merge, sentBy, splitFor, weigh } from './estimate'
 import { atLeast, describeTool } from './format'
 import { type Line, type Seg, buildLines } from './layout'
 import { familyOf } from './palette'
 import { overrideFrom, overridesFrom, settingsFrom } from './settings'
+import { EMPTY_WATCH, type ShellRow, endShells, finishedIn, isShellCall, isWatching, readShells } from './shells'
 import { isLive } from './tree'
 
 const MAIN = 'main'
@@ -15,7 +16,9 @@ const MARGIN = 1
 const LOG_KEY = 'usage-log'
 const SESSIONS_KEY = 'sessions'
 const SETTINGS_KEY = 'settings'
-const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|split on|off, or /canopy reset.'
+const USAGE_HINT = 'Use /canopy set amber|red <percent>, /canopy set plan|session|agents|shells|split on|off, or /canopy reset.'
+/** How many of an agent's newest rows the first look at its conversation reads, to find the shell call its reply just made. */
+const FIRST_READ = 40
 
 const limits = atom({ plugin: 'context-canopy', key: 'limits' } as const, [] as LimitWindow[])
 const main = atom({ plugin: 'context-canopy', key: 'main' } as const, {} as MainContext)
@@ -32,6 +35,10 @@ const roster = atom({ plugin: 'context-canopy', key: 'roster' } as const, [] as 
 const loops = atom({ plugin: 'context-canopy', key: 'loops' } as const, {} as Record<string, LoopLive>)
 const isCollapsed = atom({ plugin: 'context-canopy', key: 'isCollapsed' } as const, false)
 const overrides = atom({ plugin: 'context-canopy', key: 'overrides' } as const, {} as Overrides)
+/** The plan line of the terminal's welcome logo: how the session is billed. */
+const plan = atom({ plugin: 'context-canopy', key: 'plan' } as const, null as string | null)
+/** Each agent's background shells, by agent id, `main` included. */
+const shells = atom({ plugin: 'context-canopy', key: 'shells' } as const, {} as Record<string, ShellWatch>)
 
 let log: UsageLog = {}
 let sessions: SessionLog = {}
@@ -39,6 +46,15 @@ let pending: UsageLog = {}
 let timers: Timer[] = []
 let asks: Record<string, { count: number; columns: number; lines: number }> = {}
 let lastError = ''
+/** The last row of each agent's conversation the band has read for shells, so each read takes only what is new. */
+let cursors: Record<string, string> = {}
+/**
+ * The plan line the welcome logo was last drawn with. Drawing may not write
+ * state, so the logo's hook keeps it here and the one-second poll takes it in.
+ */
+let welcomePlan: string | null | undefined
+/** The plan line the poll last took in, so a poll with nothing new reads no state. */
+let takenPlan: string | null | undefined
 
 /** Text every monospaced face draws a cell to the character: printable ASCII. */
 const PLAIN = /^[\x20-\x7e]+$/
@@ -114,6 +130,9 @@ async function followSession($: EngineInterface, startedAt: number): Promise<voi
   const saved = sessions[startedAt]
   await update($, sessionTokens, () => saved?.tokens ?? {})
   await setLoop($, MAIN, { sent: undefined, received: undefined })
+  // A new session's shells are its own: none of the last one's is listed or read for.
+  cursors = {}
+  await update($, shells, () => ({}))
   await update($, sessionAt, () => startedAt)
 }
 
@@ -135,6 +154,13 @@ async function apply($: EngineInterface, usage: SessionUsage): Promise<void> {
 /** `withThreshold` also asks where auto-compaction runs, a local estimate that only moves with the window. */
 async function measure($: EngineInterface, withThreshold: boolean): Promise<void> {
   await apply($, await $.session.usage(withThreshold ? { breakdown: 'summary' } : undefined))
+}
+
+/** Takes in the plan line the welcome logo was drawn with, once it has been. */
+async function followPlan($: EngineInterface): Promise<void> {
+  if (welcomePlan === undefined || welcomePlan === takenPlan) return
+  takenPlan = welcomePlan
+  await update($, plan, () => takenPlan ?? null)
 }
 
 /** Takes in a fresh reading when the session changed or its cost moved, which `/clear` does without a measure event. */
@@ -162,6 +188,45 @@ async function pollAgents($: EngineInterface): Promise<void> {
   const live = new Set(rows.filter(isLive).map(row => row.id))
   await update($, roster, () => rows)
   await update($, loops, all => Object.fromEntries(Object.entries(all).filter(([id]) => id === MAIN || live.has(id))))
+  // An agent's shells go when it does: a subagent's are stopped as it ends.
+  await update($, shells, all => Object.fromEntries(Object.entries(all).filter(([id]) => id === MAIN || live.has(id))))
+}
+
+/**
+ * Reads what is new in one agent's conversation for its background shells: a
+ * shell call it made, the answer that says the command went on in the
+ * background, and the task notice that says it finished. It reads only while
+ * the agent has made a shell call or has a shell running, and keeps nothing of
+ * the rows but the shells' ids, names and commands.
+ */
+async function followShells($: EngineInterface, id: string, toolUses: readonly { name: string }[]): Promise<void> {
+  if (!settingsFrom(await read($, overrides)).showShells) return
+  const before = (await read($, shells))[id]
+  if (!isWatching(before) && !toolUses.some(use => isShellCall(use.name))) return
+  const agent = id === MAIN ? {} : { agentId: id }
+  const cursor = cursors[id]
+  const rows = await $.session.messages(cursor ? { ...agent, after: cursor } : { ...agent, last: FIRST_READ })
+  if (!Array.isArray(rows)) {
+    // The row read on from was compacted away or rewound: the next read starts again from the newest rows.
+    delete cursors[id]
+
+    return
+  }
+  const last = rows.at(-1)?.uuid
+  if (last) cursors[id] = last
+  const now = await $.clock.now()
+  await update($, shells, all => {
+    const next = readShells(all[id] ?? EMPTY_WATCH, rows as readonly ShellRow[], now)
+
+    return isWatching(next) || next.ended.length ? { ...all, [id]: next } : all
+  })
+}
+
+/** A task notice that starts a turn ends the shell it names straight away, before the turn's first reply. */
+async function noticeShells($: EngineInterface, id: string, text: string): Promise<void> {
+  const ids = finishedIn(text)
+  if (!ids.size) return
+  await update($, shells, all => (all[id] ? { ...all, [id]: endShells(all[id], ids) } : all))
 }
 
 /** A tool call's input as the record `describeTool` reads; anything else reads as empty. */
@@ -216,6 +281,8 @@ async function snapshot($: EngineInterface, width: number, { collapsed, maxRows 
     sessionTokens: await read($, sessionTokens),
     usd: await read($, usd),
     noLimitReported: !windows.length && !(await read($, limitsSeen)) && (await read($, hasReplied)),
+    plan: await read($, plan),
+    shells: Object.fromEntries(Object.entries(await read($, shells)).map(([id, watch]) => [id, watch.open])),
     main: { ...mainContext, ...allLoops[MAIN], model: allLoops[MAIN]?.model ?? mainContext.model },
     roster: await read($, roster),
     loops: allLoops,
@@ -247,6 +314,8 @@ async function setOverrides($: EngineInterface, change: (now: Overrides) => Over
 export const register: Register = on => {
   pending = {}
   boxMono = false
+  welcomePlan = undefined
+  takenPlan = undefined
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -264,7 +333,7 @@ export const register: Register = on => {
     await quietly(measure($, true).then(() => refreshPlanSplit($)))
     for (const timer of timers) timer.cancel()
     timers = [
-      $.clock.every(1000, () => void quietly(Promise.all([pollAgents($), followModel($), followUsage($)]))),
+      $.clock.every(1000, () => void quietly(Promise.all([pollAgents($), followModel($), followUsage($), followPlan($)]))),
       $.clock.every(60_000, () => void quietly(flush($))),
     ]
 
@@ -287,6 +356,7 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     await quietly(setLoop($, e.agentId ?? MAIN, { activity: 'thinking…' }))
+    await quietly(noticeShells($, e.agentId ?? MAIN, e.text))
 
     return next(e)
   })
@@ -299,6 +369,7 @@ export const register: Register = on => {
     // What the reply asks to run next is what the agent is doing. It is read from the reply, so the band hooks no tool call.
     const last = result.toolUses.at(-1)
     if (last) await quietly(setLoop($, id, { activity: describeTool(last.name, toRecord(last.input)) }))
+    await quietly(followShells($, id, result.toolUses))
 
     return result
   })
@@ -327,6 +398,13 @@ export const register: Register = on => {
     const collapsed = await update($, isCollapsed, now => (arg === 'collapse' ? true : arg === 'expand' ? false : !now))
 
     return { text: collapsed ? 'Context Canopy collapsed to one line.' : 'Context Canopy expanded.' }
+  })
+
+  // The welcome logo names how the session is billed. The band reads that line and draws the logo as it is.
+  on('ui.render', { component: 'Welcome' }, async ($, e, next) => {
+    if (e.props.isLive) welcomePlan = e.props.plan.trim() || null
+
+    return next(e)
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

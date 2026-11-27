@@ -1,8 +1,9 @@
-import type { AgentRow, Family, FamilyTokens, LimitWindow, LoopLive, MainContext } from '../types'
-import { SPEND, clip, money, pad, tokens, until, windowLabel } from './format'
+import type { AgentRow, Family, FamilyTokens, LimitWindow, LoopLive, MainContext, Shell } from '../types'
+import { billingFrom } from './billing'
+import { clip, duration, money, pad, tokens, until, windowLabel } from './format'
 import { FAMILIES, FAMILY_COLOUR, HEALTH_COLOUR, type Health, familyName, familyOf, healthOf, modelLabel } from './palette'
 import type { Settings } from './settings'
-import { buildTree, flatten } from './tree'
+import { type TreeNode, buildTree, flatten } from './tree'
 
 export type Seg = { text: string; color?: string; dim?: boolean; bold?: boolean }
 export type Line = Seg[]
@@ -16,6 +17,10 @@ export type View = {
   usd: number | null
   /** Whether Claude has replied and reported no limit: an API key, a cloud provider, or a seat billed by use. */
   noLimitReported: boolean
+  /** The plan line of the terminal's welcome logo (`Claude Enterprise`, `API Usage Billing`), once it has been drawn. */
+  plan?: string | null
+  /** Each agent's background shells, `main` included. */
+  shells?: Readonly<Record<string, readonly Shell[]>>
   main: MainContext & LoopLive
   roster: readonly AgentRow[]
   loops: Readonly<Record<string, LoopLive>>
@@ -25,7 +30,10 @@ export type View = {
   maxRows?: number
 }
 
-type Row = { guides: string; glyph: string; name: string; live: LoopLive; activity: string; isMain?: boolean; isIdle?: boolean }
+type Row = { guides: string; glyph: string; name: string; live: LoopLive; activity: string; isMain?: boolean; isIdle?: boolean; shell?: Shell }
+
+/** One entry of the agent tree: an agent, or a shell one of them left running, under it. */
+type Entry = { guides: string; node: TreeNode; shell?: undefined } | { guides: string; shell: Shell; node?: undefined }
 
 const DEFAULT_WINDOW = 200_000
 const NARROW = 72
@@ -40,9 +48,10 @@ const GUTTER = 2
 /** The sent and received column on agent rows, its gap included. */
 const FLOW = 14
 const PLAN = 'Plan Limits'
-const MONTH = windowLabel(SPEND)
-/** What a plan row reads where Claude Code reports no limit: an API key, a cloud provider, or a seat billed by use. */
+/** What the plan row reads where Claude Code reports no limit and the welcome logo hasn't named the plan. */
 const NOT_REPORTED = 'not reported'
+/** A shell's sign in the tree: plain ASCII, so every face draws it in one cell. */
+const SHELL = '$'
 const LIMITED: Seg = { text: 'limited', color: HEALTH_COLOUR.bad, bold: true }
 const DIM = { dim: true }
 const HEADING = { dim: true, bold: true }
@@ -62,17 +71,42 @@ const planHealth = (pct: number, v: View): Health => healthOf(pct, 100, v.settin
 const resetKey = (resetsAt: string | undefined, now: number): string => (until(resetsAt, now) ? `↻ ${until(resetsAt, now)}` : '')
 /** No limit to show, so the plan line says so in a row of its own. */
 const noLimit = (v: View): boolean => v.noLimitReported && !v.limits.length
+/** With no limit reported: the plan the welcome logo names and what to say of it, or `not reported` alone. */
+const unreported = (v: View): { name: string; note?: string } => billingFrom(v.plan) ?? { name: NOT_REPORTED }
 /** Each plan row's name and the key after it. */
 const planKeys = (v: View): [string, string][] => [
   ...v.limits.map((w): [string, string] => [windowLabel(w.kind), resetKey(w.resetsAt, v.now)]),
-  ...(noLimit(v) ? [[MONTH, ''] as [string, string]] : []),
+  ...(noLimit(v) ? [[unreported(v).name, ''] as [string, string]] : []),
 ]
 /** Wide enough for the longest plan row name. */
 const nameWidth = (v: View): number => Math.max(0, ...planKeys(v).map(([name]) => name.length)) + 2
 const agentKeyRoom = (v: View): number => (v.width >= WIDE ? KEY * 1.5 : KEY)
+const shellsOf = (v: View, id: string): readonly Shell[] => (v.settings.showShells ? (v.shells?.[id] ?? []) : [])
+/** A shell's name in the tree: its own few words, else its command. */
+const shellName = (shell: Shell): string => shell.name || shell.command
+
+/**
+ * The tree depth first, each entry with its `├─ └─ │` guides. An agent's shells
+ * come straight under it, before the agents it started, so a shell giving way
+ * never leaves a guide pointing at nothing.
+ */
+function entries(v: View, roots: readonly TreeNode[], own: readonly Shell[], lead = ''): Entry[] {
+  const items: ({ shell: Shell } | { node: TreeNode })[] = [...own.map(shell => ({ shell })), ...roots.map(node => ({ node }))]
+
+  return items.flatMap((item, i): Entry[] => {
+    const isLast = i === items.length - 1
+    const guides = lead + (isLast ? '└─' : '├─')
+    if ('shell' in item) return [{ guides, shell: item.shell }]
+
+    return [{ guides, node: item.node }, ...entries(v, item.node.children, shellsOf(v, item.node.id), lead + (isLast ? '  ' : '│ '))]
+  })
+}
+
 /** The longest agent key, guides, status and name, with a column to spare. */
 const agentKeyLength = (v: View): number =>
-  v.settings.showAgents ? Math.max(0, ...flatten(buildTree(v.roster)).map(({ node, guides }) => guides.length + 3 + (node.name ?? node.type).length)) : 0
+  v.settings.showAgents
+    ? Math.max(0, ...entries(v, buildTree(v.roster), shellsOf(v, 'main')).map(e => e.guides.length + 3 + (e.shell ? shellName(e.shell) : (e.node.name ?? e.node.type)).length))
+    : 0
 
 /** Wide enough for every row's key, with a column to spare: a plan row and its reset time, or a long agent name on a wide terminal. */
 function keyWidth(v: View, narrow: boolean): number {
@@ -130,16 +164,18 @@ function column(cells: Line, width: number): Line {
   return used > width ? clipLine(cells, width) : [...cells, seg(' '.repeat(width - used))]
 }
 
-type Cells = { key: Line; model?: Seg; bar?: Line; value?: Seg; detail: Line | ((room: number) => Line) }
+/** `spans`: a row with no model takes that column for its key too, so a long note isn't cut. */
+type Cells = { key: Line; model?: Seg; spans?: true; bar?: Line; value?: Seg; detail: Line | ((room: number) => Line) }
 
 /** One row of the grid: label, key, model, bar and value columns, then as much detail as fits. */
 function row(heading: string, c: Cells, v: View, narrow: boolean): Line {
+  const modelWidth = narrow ? 8 : 12
   const line = [
     label(heading),
     // A key that fills its column still leaves a space before the model.
-    ...column(c.key, keyWidth(v, narrow) - 1),
-    seg(' '),
-    ...column(c.model ? [c.model] : [], narrow ? 8 : 12),
+    ...(c.spans
+      ? column(c.key, keyWidth(v, narrow) + modelWidth)
+      : [...column(c.key, keyWidth(v, narrow) - 1), seg(' '), ...column(c.model ? [c.model] : [], modelWidth)]),
     ...(narrow ? [] : column(c.bar ?? [], BAR + 2)),
     ...column(c.value ? [c.value] : [], 6),
   ]
@@ -176,17 +212,26 @@ function windowCells(w: LimitWindow, v: View, width: number): Cells {
   }
 }
 
-/** A row with no limit to measure it by: `not reported` where the bar would be, or as its detail when narrow. */
-function unreportedCells(key: Line, narrow: boolean): Cells {
-  return { key, bar: [seg(NOT_REPORTED, DIM)], detail: narrow ? [gutter(), seg(NOT_REPORTED, DIM)] : [] }
+/**
+ * A row with no limit to measure it by. The plan the welcome logo names, and
+ * what to say of it where the bar would be (or as its detail when narrow):
+ * where an Enterprise seat's spend is shown, or that an API key has no plan
+ * limit. With no plan named, `not reported` alone.
+ */
+function unreportedCells(v: View, width: number, narrow: boolean): Cells {
+  const { name, note } = unreported(v)
+  const key = [seg(pad(name, width), note ? {} : DIM)]
+  if (!note) return { key, detail: [] }
+
+  return { key, bar: [seg(note, DIM)], detail: narrow ? [gutter(), seg(note, DIM)] : [] }
 }
 
-/** The plan's windows, or `month` alone when no limit is reported. */
+/** The plan's windows, or a row of its own when no limit is reported. */
 function planLines(v: View, narrow: boolean): Line[] {
   const width = nameWidth(v)
   const rows = [
     ...v.limits.map(w => windowCells(w, v, width)),
-    ...(noLimit(v) ? [unreportedCells([seg(pad(MONTH, width))], narrow)] : []),
+    ...(noLimit(v) ? [unreportedCells(v, width, narrow)] : []),
   ]
   if (!rows.length) return shares(v.sessionTokens).length ? [] : [[label(PLAN), seg('appears after the first reply', DIM)]]
 
@@ -237,12 +282,51 @@ function agentLine(r: Row, v: View, narrow: boolean, heading: string): Line {
   return row(heading, cells, v, narrow)
 }
 
-/** The row that ends a cropped tree: how many agents it hides, and how many of those are near compacting. */
+/**
+ * A shell an agent left running, under it: its name, how long it has run, and
+ * its command in line with the agents' activity. It has no bar, as there is
+ * nothing for it to fill.
+ */
+function shellLine(r: Row, shell: Shell, v: View, narrow: boolean): Line {
+  const name = shellName(shell)
+  const cells: Cells = {
+    key: [seg(r.guides, DIM), seg(`${SHELL} `, DIM), seg(name)],
+    model: seg('shell', DIM),
+    value: seg(duration(v.now - shell.startedAt), DIM),
+    detail: [gutter(), ...(narrow ? [] : [seg(pad('', FLOW))]), seg(name === shell.command ? '' : shell.command, DIM)],
+  }
+
+  return row('', cells, v, narrow)
+}
+
+/** `+3 more agents, 2 shells`, or `+2 more shells` when only shells are hidden. */
+function hiddenText(agents: number, shells: number): string {
+  if (!agents) return `+${plural(shells, 'more shell')}`
+
+  return `+${plural(agents, 'more agent')}${shells ? `, ${plural(shells, 'shell')}` : ''}`
+}
+
+/** The row that ends a cropped tree: how many agents and shells it hides, and how many of the agents are near compacting. */
 function moreLine(hidden: readonly Row[], v: View, narrow: boolean): Line {
-  const hot = hidden.filter(r => isHot(r.live, v)).length
+  const agents = hidden.filter(r => !r.shell)
+  const hot = agents.filter(r => isHot(r.live, v)).length
   const detail = hot ? [warnGutter(), healthSeg(`${hot} ${hot === 1 ? 'compacts' : 'compact'} soon`, 'bad')] : []
 
-  return row('', { key: [seg(`+${plural(hidden.length, 'more agent')}`, DIM)], detail }, v, narrow)
+  return row('', { key: [seg(hiddenText(agents.length, hidden.length - agents.length), DIM)], spans: true, detail }, v, narrow)
+}
+
+/**
+ * The rows shown in `room`: all of them when they fit. Past that, shells give
+ * way first, the lowest first, so each agent keeps its row while there's room
+ * for it; then the tree is cut, keeping main. A row says what is hidden.
+ */
+function fit(rows: readonly Row[], room: number): Row[] {
+  if (rows.length <= room) return [...rows]
+  const keep = Math.max(1, room - 1)
+  let shown = [...rows]
+  for (let i = shown.length - 1; i >= 0 && shown.length > keep; i--) if (shown[i]!.shell) shown.splice(i, 1)
+
+  return shown.slice(0, keep)
 }
 
 /** The tree in `room` rows at most: past that, as many as fit, then a row saying what it hides. */
@@ -250,7 +334,8 @@ function agentLines(v: View, narrow: boolean, room = Infinity): Line[] {
   const roots = buildTree(v.roster)
   const rows: Row[] = [
     { guides: '', glyph: '●', name: 'main', live: v.main, activity: v.main.activity || waiting(roots.length) || 'ready', isMain: true },
-    ...flatten(roots).map(({ node, guides }) => {
+    ...entries(v, roots, shellsOf(v, 'main')).map(({ node, shell, guides }): Row => {
+      if (shell) return { guides, glyph: SHELL, name: shellName(shell), live: {}, activity: '', shell }
       const live = v.loops[node.id] ?? {}
       const isIdle = node.status === 'idle'
       const activity = live.activity || waiting(node.children.length) || (isIdle ? 'idle' : (node.description ?? ''))
@@ -259,16 +344,23 @@ function agentLines(v: View, narrow: boolean, room = Infinity): Line[] {
     }),
   ]
 
-  const shown = rows.length > room ? rows.slice(0, Math.max(1, room - 1)) : rows
-  const lines = shown.map((r, i) => agentLine(r, v, narrow, i ? '' : 'Agents'))
+  const shown = fit(rows, room)
+  const lines = shown.map((r, i) => (r.shell ? shellLine(r, r.shell, v, narrow) : agentLine(r, v, narrow, i ? '' : 'Agents')))
+  const hidden = rows.filter(r => !shown.includes(r))
 
-  return shown.length < rows.length ? [...lines, moreLine(rows.slice(shown.length), v, narrow)] : lines
+  return hidden.length ? [...lines, moreLine(hidden, v, narrow)] : lines
+}
+
+function unreportedItem(v: View): Line {
+  const { name, note } = unreported(v)
+
+  return note ? [seg(`${name} `), seg(note, DIM)] : [seg(name, DIM)]
 }
 
 function collapsedPlan(v: View): Line {
   const items = [
     ...v.limits.map(w => [seg(`${windowLabel(w.kind)} `), healthSeg(percent(w.percentUsed), planHealth(w.percentUsed, v))]),
-    ...(noLimit(v) ? [[seg(`${MONTH} `), seg(NOT_REPORTED, DIM)]] : []),
+    ...(noLimit(v) ? [unreportedItem(v)] : []),
   ]
   if (!v.settings.showPlan || !items.length) return []
 
@@ -286,10 +378,12 @@ function collapsedAgents(v: View): Line {
   const agents = flatten(buildTree(v.roster))
   const hot = agents.filter(({ node }) => isHot(v.loops[node.id] ?? {}, v)).length
   const main = contextOf(v.main, v.main, v.settings)
+  const shells = entries(v, buildTree(v.roster), shellsOf(v, 'main')).filter(e => e.shell).length
 
   return [
     seg('Agents ', HEADING),
     seg(`${agents.length + 1} ●`),
+    ...(shells ? [seg(`  ${shells} ${SHELL}`, DIM)] : []),
     ...(hot ? [healthSeg(`  ${hot} ⚠`, 'bad')] : []),
     ...(main ? [seg('  main ', DIM), healthSeg(percent(main.pct), main.health)] : []),
   ]

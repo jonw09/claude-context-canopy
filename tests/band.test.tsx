@@ -322,7 +322,7 @@ test('/clear starts the session figures over, and a resumed session picks its ow
     // drain the stream
   }
   expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
-  expect(await show()).toMatch(/Plan Limits +month +not reported/)
+  expect(await show()).toMatch(/Plan Limits +not reported/)
   expect(await show()).toMatch(/● main .*↑20k +↓1k/)
 
   // `/clear`: Claude Code starts a new session and its cost over, and raises no measure event for it.
@@ -337,7 +337,8 @@ test('/clear starts the session figures over, and a resumed session picks its ow
   expect(await show()).toMatch(/Session +21k tok +\$5\.00 /)
 })
 
-test('the band asks for no login and makes no network request', async ($, on) => {
+// An hour of the band's one-second poll takes most of the default five seconds on a slow machine.
+test('the band asks for no login and makes no network request', { timeoutMs: 20_000 }, async ($, on) => {
   const clock = engine(on, { agents: [{ id: 'r', type: 'reviewer', description: 'Review', status: 'running' }] })
   replies(on, () => [{ name: 'Bash', input: { command: 'npm test' } }])
   // Each is only counted: neither hands the band anything it could use.
@@ -408,7 +409,7 @@ test('a spend setting an earlier version saved is dropped', async ($, on) => {
   engine(on, { stored: { settings: { spend: false, plan: false } } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect((await $.command.run(canopy('set split off'))).text).toBe('Context Canopy settings: plan off, split off.')
-  expect((await $.command.run(canopy('set spend on'))).text).toMatch(/^Use \/canopy set amber\|red <percent>, \/canopy set plan\|session\|agents\|split on\|off/)
+  expect((await $.command.run(canopy('set spend on'))).text).toMatch(/^Use \/canopy set amber\|red <percent>, \/canopy set plan\|session\|agents\|shells\|split on\|off/)
 })
 
 test('/canopy set changes a setting for later sessions, and reset puts the defaults back', async ($, on) => {
@@ -421,4 +422,138 @@ test('/canopy set changes a setting for later sessions, and reset puts the defau
   expect((await $.command.run(canopy('show 80'))).text).not.toMatch(/Plan Limits/)
   expect((await $.command.run(canopy('reset'))).text).toBe('Context Canopy settings: all defaults.')
   expect((await $.command.run(canopy('show 80'))).text).toMatch(/Plan Limits/)
+})
+
+const WELCOME = {
+  plugin: 'context-canopy',
+  component: 'Welcome',
+  surface: 'terminal',
+  requestId: 'site:welcome',
+  props: { version: '2.1.332', model: 'Opus 5.5', plan: 'Claude Enterprise', cwd: '~/shop', agent: null, isLive: true },
+} as const
+
+test("the welcome logo's plan line names the plan when no limit is reported, and the logo is drawn as it was", async ($, on) => {
+  const clock = engine(on, { usage: { ...USAGE, rateLimits: [] } as SessionUsage })
+  replies(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await step($)
+  const show = async (): Promise<string> => (await $.command.run(canopy('show 100'))).text ?? ''
+  expect(await show()).toMatch(/Plan Limits +not reported/)
+
+  // A copy of the header (the /resume preview, an export) is not this session's.
+  const copy = await $.ui.mount({ ...WELCOME, requestId: 'site:welcome:copy', props: { ...WELCOME.props, plan: 'Claude Max', isLive: false } })
+  expect(await copy.keepsBeneath()).toBe(true)
+  await copy.unmount()
+  await clock.advance(1000)
+  expect(await show()).toMatch(/Plan Limits +not reported/)
+
+  const logo = await $.ui.mount(WELCOME)
+  expect(await logo.keepsBeneath()).toBe(true)
+  await logo.unmount()
+  // The band takes it in on its next poll, as drawing may not write state.
+  await clock.advance(1000)
+  expect(await show()).toMatch(/Plan Limits +Enterprise +see \/usage/)
+})
+
+test('with windows reported, the plan named leaves the plan line as it was', async ($, on) => {
+  const clock = engine(on)
+  replies(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await (await $.ui.mount({ ...WELCOME, props: { ...WELCOME.props, plan: 'Claude Max' } })).unmount()
+  await clock.advance(1000)
+  await step($)
+  const shown = (await $.command.run(canopy('show 100'))).text ?? ''
+  expect(shown).toMatch(/Plan Limits +5h /)
+  expect(shown).not.toMatch(/Max|see \/usage/)
+})
+
+/** Main's conversation as `$.session.messages` gives it, each row with its uuid; each read takes what is after its cursor, or the newest. */
+function conversation(on: On) {
+  const rows: { role: 'user' | 'assistant'; text: string; toolUses: unknown[]; toolResults?: unknown[]; uuid: string }[] = []
+  const reads: Record<string, unknown>[] = []
+  on('session.messages', (_, e) => {
+    const args = (e ?? {}) as { after?: string; last?: number }
+    reads.push(args)
+    const from = args.after ? rows.findIndex(row => row.uuid === args.after) + 1 : Math.max(0, rows.length - (args.last ?? rows.length))
+
+    return { value: rows.slice(from) as never }
+  })
+  const add = (row: Omit<(typeof rows)[number], 'uuid'>) => rows.push({ ...row, uuid: `m${rows.length}` })
+
+  return { add, reads }
+}
+
+const DEV = { command: 'npm run dev', description: 'Start dev server', run_in_background: true }
+
+test('a shell an agent leaves running in the background shows under it until its task notice arrives', async ($, on) => {
+  const clock = engine(on)
+  const { add, reads } = conversation(on)
+  let uses: TurnStepToolUse[] = []
+  replies(on, () => uses)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const show = async (): Promise<string> => (await $.command.run(canopy('show 120'))).text ?? ''
+
+  // Main asks for the dev server in the background; the band reads main's conversation for the call.
+  uses = [{ name: 'Bash', input: DEV }]
+  add({ role: 'user', text: 'start the dev server', toolUses: [] })
+  add({ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'u1', tool: 'Bash', input: DEV }] })
+  await step($)
+  expect(reads).toEqual([{ last: 40 }])
+  expect(await show()).not.toMatch(/Start dev server/)
+
+  // Its answer says it is running in the background.
+  uses = []
+  add({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'u1', text: 'Command running in background with ID: b7k2. Output is being written to: /tmp/x.', isError: false }] })
+  await step($)
+  expect(reads.at(-1)).toEqual({ after: 'm1' })
+  await clock.advance(12 * 60_000)
+  expect(await show()).toMatch(/└─\$ Start dev server +shell +12m +npm run dev/)
+
+  // The notice that it finished starts main's next turn: the shell goes at once.
+  await $.turn.start({ turnId: 't2', text: '<task-notification>\n<task-id>b7k2</task-id>\n<status>completed</status>\n</task-notification>' })
+  expect(await show()).not.toMatch(/Start dev server/)
+
+  // With no shell running and no shell call made, the conversation is not read.
+  const before = reads.length
+  await step($)
+  expect(reads.length).toBe(before)
+})
+
+test("a subagent's shells go when it does, and /canopy set shells off reads and shows none", async ($, on) => {
+  const agents: Partial<AgentInfo>[] = [{ id: 'r', type: 'reviewer', description: 'Review', status: 'running' }]
+  const clock = engine(on, { agents })
+  const reads: unknown[] = []
+  on('session.messages', (_, e) => {
+    reads.push(e)
+
+    return {
+      value: [{ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'u9', tool: 'Bash', input: DEV, text: 'Command running in background with ID: q1.' }], uuid: 'a1' }] as never,
+    }
+  })
+  replies(on, agentId => (agentId ? [{ name: 'Bash', input: DEV }] : []))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(1000)
+  const show = async (): Promise<string> => (await $.command.run(canopy('show 120'))).text ?? ''
+
+  await step($, 'r')
+  expect(reads).toEqual([{ agentId: 'r', last: 40 }])
+  expect(await show()).toMatch(/└─● reviewer [^\n]*\n +└─\$ Start dev server/)
+  expect((await $.command.run(canopy('', ))).text).toBe('Context Canopy collapsed to one line.')
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /2 ●  1 \$/ })).toBeDefined()
+  await ui.unmount()
+  await $.command.run(canopy('expand'))
+
+  await $.command.run(canopy('set shells off'))
+  expect(await show()).not.toMatch(/Start dev server/)
+  await step($, 'r')
+  expect(reads).toHaveLength(1)
+  await $.command.run(canopy('set shells on'))
+  expect(await show()).toMatch(/Start dev server/)
+
+  // The reviewer finishes: its shells are stopped with it.
+  agents[0]!.status = 'completed'
+  await clock.advance(1000)
+  expect(await show()).not.toMatch(/Start dev server|reviewer/)
 })

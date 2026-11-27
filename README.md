@@ -16,9 +16,9 @@ Your session, plan limits and every running agent, in one band above the Claude 
 
 ![The band on Pro or Max: the session by model, 5h and 7d windows, and a tree of agents cut to fit, ending with 3 more agents, 1 of them near compacting](docs/images/band.png)
 
-**Enterprise, an API key or a cloud provider.** Claude Code reports no plan limit for these, so the plan line says `not reported`. The session's cost and every agent show as usual.
+**Enterprise, an API key or a cloud provider.** Claude Code gives plugins no limit or spend for these. In a terminal the plan line names your plan and says where to look instead: `see /usage` on Enterprise, or `no plan limit` for an API key or cloud provider. The session's cost and every agent show as usual.
 
-![The band with no limit reported: the session at $18.40, the plan line reading month, not reported, and a tree of agents cut to fit](docs/images/no-limit.png)
+![The band on Enterprise: the session at $18.40, the plan line reading Enterprise, see /usage, and a tree of agents cut to fit](docs/images/no-limit.png)
 
 ## What it shows
 
@@ -26,7 +26,7 @@ Your session, plan limits and every running agent, in one band above the Claude 
 | --- | --- |
 | **Session** | Tokens and cost for this session, and each model's share |
 | **Plan** | Your plan's limits: how full each is, when it resets, and an estimate of which models used it. On Pro and Max that's the 5-hour and 7-day windows |
-| **Agents** | Every running agent as a tree, however deep: its model, how full its context is, the tokens it has sent and received, and what it is doing right now |
+| **Agents** | Every running agent as a tree, however deep: its model, how full its context is, the tokens it has sent and received, and what it is doing right now. Under each agent, the shells it has left running in the background |
 
 Two rules keep it quick to read:
 
@@ -108,7 +108,7 @@ The cost is Claude Code's own figure, as `/cost` shows it, worked out at API pri
 
 The 5-hour and 7-day windows appear after Claude's first reply, when they're first reported.
 
-**The row's name.** Claude Code doesn't tell plugins which plan you're on, so the row is headed **Plan Limits**.
+**The row's name.** Claude Code doesn't give plugins your plan directly, so the row is headed **Plan Limits**.
 
 **Team, Enterprise and API keys.** What the line shows depends on what Claude Code reports for your account:
 
@@ -116,7 +116,12 @@ The 5-hour and 7-day windows appear after Claude's first reply, when they're fir
 | --- | --- |
 | Pro, Max, Team seats with usage limits | The 5-hour and 7-day windows |
 | A Claude gateway's spend limit | `month`: how much of the limit is used |
-| Enterprise and other seats billed by what they use, an API key, a cloud provider, or a gateway with no limit | `month` reading `not reported`, as Claude Code gives plugins no limit or spend for these. On Enterprise, Claude Code's own `/usage` shows what you've spent |
+| Enterprise and other seats billed by what they use | `Enterprise` (or your plan's name) and `see /usage`. Claude Code gives plugins no spend or spend limit, but its own `/usage` shows both |
+| An API key | `API key` and `no plan limit`: you're billed per token, against no plan |
+| A cloud provider (Amazon Bedrock, Google Vertex AI, Microsoft Foundry and others) | The provider's name and `no plan limit` |
+| A gateway with no limit | `Cloud gateway` and `not reported` |
+
+The plan's name comes from the plan line of Claude Code's welcome logo, which only the terminal draws. Where there's no logo to read, such as the desktop app, the line says `not reported` alone.
 
 ### Agents
 
@@ -147,7 +152,23 @@ These are the same 60% and 90% points as the plan line, and [`/canopy set`](#set
 
 The main row names your model from the start, and changes as soon as you switch with `/model`. If a request falls back to another model, the row shows the one that answered.
 
-**A tall tree** is cut to fit the room Claude Code gives the band, and ends with a row such as `+3 more agents`, adding `⚠ 1 compacts soon` if any of the hidden agents are near compacting. `/canopy show` prints the whole tree.
+**Background shells.** A command an agent leaves running in the background, such as a dev server or a test watcher, shows straight under that agent, with how long it has run and its command in line with the agents' activity:
+
+```
+├─$ Dev server      shell                     1h14m                 npm run dev
+│ │ │               │                         │                     └ its command
+│ │ │               │                         └ how long it has run
+│ │ │               └ a shell, not a model: it has no bar, as there's nothing for it to fill
+│ │ └ what Claude called it, or its command
+│ └ $ marks a shell
+└ under the agent that started it
+```
+
+It goes when the command finishes or is stopped, or when its agent ends. A command running in the foreground already shows as the agent's activity (`Bash: npm test`). `/canopy set shells off` hides them.
+
+![Background shells in the tree: a dev server under main, and a test watcher and a log tail under test-writer](docs/images/shells.png)
+
+**A tall tree** is cut to fit the room Claude Code gives the band. Shells give way first, so every agent keeps its row while there's room for it. The tree then ends with a row such as `+3 more agents, 2 shells`, adding `⚠ 1 compacts soon` if any of the hidden agents are near compacting. `/canopy show` prints the whole tree.
 
 **Long agent names** get up to half as much room again in a terminal 120 columns or wider, before they're cut.
 
@@ -180,6 +201,7 @@ There's nothing to set up: the defaults suit most people. To change one, use `/c
 | `/canopy set plan off` | on | The plan line |
 | `/canopy set session off` | on | The session line |
 | `/canopy set agents off` | on | The agent tree |
+| `/canopy set shells off` | on | Background shells in the agent tree |
 | `/canopy set split off` | on | The `≈` model shares on the plan line |
 
 For example, to keep only the agent tree:
@@ -223,7 +245,7 @@ If the band doesn't appear, run `/canopy status`. It lists which apps are attach
 
 Context Canopy keeps everything on your machine. It makes no network requests, reads no login, key or credential, calls no model, and sends nothing anywhere itself.
 
-To show what each agent is doing, it reads the last tool call in each of Claude's replies: the tool's name and its main argument (a file path, command or search). It holds that in memory for the session only. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
+To show what each agent is doing, it reads the last tool call in each of Claude's replies: the tool's name and its main argument (a file path, command or search). To show the shells an agent leaves running, it reads that agent's newest conversation rows while it has a shell running or has just asked for one. It holds what it finds in memory for the session only. It saves only numbers on this machine (hourly token counts per model, each session's tokens per model, and your settings), never prompts, file names or content.
 
 ### What it fetches, runs and sends
 
@@ -241,10 +263,10 @@ Context Canopy is a mod: code that hooks events in Claude Code. It reads what ea
 | `session.start` | Loads its numbers and settings from this machine, registers `/canopy`, and reads Claude Code's version (so it draws the band in a way that version accepts), the session's model and its usage. Starts two timers: one that reads the list of running agents (each one's name, type, task description and status), the model and the usage every second, and one that saves its numbers every minute |
 | `session.end` | Saves its numbers on this machine |
 | `session.measure` | Reads the session's context size, auto-compact point, cost and plan limits |
-| `turn.start`, `turn.complete` | Shows `thinking…` beside an agent while it waits for a reply, and clears what it shows when the agent's turn ends. Reads only which agent it is |
-| `turn.step` | Before a helper agent's first request, notes the model it asks for and brings it into the tree. After each reply, reads its model and token counts, and the name and main argument of the last tool call it asks for, to show what that agent is doing. The request and the reply pass on unchanged |
+| `turn.start`, `turn.complete` | Shows `thinking…` beside an agent while it waits for a reply, and clears what it shows when the agent's turn ends. At the start of a turn, looks in its text for a notice that a background shell has finished |
+| `turn.step` | Before a helper agent's first request, notes the model it asks for and brings it into the tree. After each reply, reads its model and token counts, and the name and main argument of the last tool call it asks for, to show what that agent is doing. If the reply asks for a shell command, or the agent has a shell running, it reads the agent's newest conversation rows for the shell's start and finish. The request and the reply pass on unchanged |
 | `command.run` | Answers `/canopy` itself. Every other command passes through untouched |
-| `ui.render` | Draws the band above the prompt |
+| `ui.render` | Draws the band above the prompt. Reads the plan line of Claude Code's welcome logo, and draws the logo as it is |
 
 [PRIVACY.md](PRIVACY.md) sets out exactly what it reads, keeps and adds.
 

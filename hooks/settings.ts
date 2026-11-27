@@ -7,8 +7,13 @@ export type Settings = {
   showPlan: boolean
   showSession: boolean
   showAgents: boolean
+  /** Background shells under the agent that started them. */
+  showShells: boolean
   estimate: boolean
 }
+
+const SWITCHES = ['plan', 'session', 'agents', 'shells', 'split'] as const
+type Switch = (typeof SWITCHES)[number]
 
 const clamp = (n: number, low: number, high: number): number => Math.min(Math.max(n, low), high)
 
@@ -21,6 +26,7 @@ export function settingsFrom(o: Overrides): Settings {
     showPlan: o.plan ?? true,
     showSession: o.session ?? true,
     showAgents: o.agents ?? true,
+    showShells: o.shells ?? true,
     estimate: o.split ?? true,
   }
 }
@@ -28,7 +34,7 @@ export function settingsFrom(o: Overrides): Settings {
 /** Reads `amber 70` or `split off`; anything else is undefined. */
 export function overrideFrom(key = '', value = ''): Overrides | undefined {
   if ((key === 'amber' || key === 'red') && /^\d+$/.test(value)) return { [key]: Number(value) }
-  if (['plan', 'session', 'agents', 'split'].includes(key) && /^(on|off)$/.test(value)) return { [key]: value === 'on' }
+  if (SWITCHES.includes(key as Switch) && /^(on|off)$/.test(value)) return { [key]: value === 'on' }
 
   return undefined
 }
@@ -41,7 +47,7 @@ export function overridesFrom(saved: unknown): Overrides {
   const all = typeof saved === 'object' && saved !== null ? (saved as Record<string, unknown>) : {}
   const out: Record<string, number | boolean> = {}
   for (const key of ['amber', 'red'] as const) if (typeof all[key] === 'number') out[key] = all[key]
-  for (const key of ['plan', 'session', 'agents', 'split'] as const) if (typeof all[key] === 'boolean') out[key] = all[key]
+  for (const key of SWITCHES) if (typeof all[key] === 'boolean') out[key] = all[key]
 
   return out as Overrides
 }

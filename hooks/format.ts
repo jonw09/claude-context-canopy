@@ -12,10 +12,8 @@ export function money(n: number): string {
   return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction}`
 }
 
-/** Time left until `iso`: `38m`, `2h14m`, `4d06h`. */
-export function until(iso: string | undefined, now: number): string {
-  const ms = iso ? Date.parse(iso) - now : NaN
-  if (!Number.isFinite(ms)) return ''
+/** A span of time, to the minute: `38m`, `2h14m`, `4d06h`. */
+export function duration(ms: number): string {
   const minutes = Math.max(0, Math.round(ms / 60_000))
   const hours = Math.floor(minutes / 60)
   const two = (n: number): string => String(n).padStart(2, '0')
@@ -23,6 +21,13 @@ export function until(iso: string | undefined, now: number): string {
   if (hours < 24) return `${hours}h${two(minutes % 60)}m`
 
   return `${Math.floor(hours / 24)}d${two(hours % 24)}h`
+}
+
+/** Time left until `iso`: `38m`, `2h14m`, `4d06h`. */
+export function until(iso: string | undefined, now: number): string {
+  const ms = iso ? Date.parse(iso) - now : NaN
+
+  return Number.isFinite(ms) ? duration(ms) : ''
 }
 
 /** A Claude gateway's spend limit, which Claude Code calls the monthly spend limit. */

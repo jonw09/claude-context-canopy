@@ -249,24 +249,133 @@ describe('accounts with no 5-hour or 7-day window', () => {
     expect(lines[1]).toMatch(/^Plan Limits +month +↻ 9d00h +▆+ +64% +≈ ■ Opus 70% +■ Sonnet 30%$/)
   })
 
-  test('with no limit reported, the month says so alone', async () => {
+  test('with no limit reported and no plan named, the plan line says not reported alone', async () => {
     const lines = buildLines(account({ noLimitReported: true })).map(text)
-    expect(find(lines, /^Plan Limits/)).toMatch(/^Plan Limits +month +not reported *$/)
-    expect(find(lines, /^Plan Limits/).indexOf('not reported')).toBe(find(lines, /^Agents/).search(/▆/))
+    expect(find(lines, /^Plan Limits/)).toMatch(/^Plan Limits  not reported *$/)
     expect(buildLines(base({ noLimitReported: true })).map(text).join('\n')).not.toMatch(/not reported/)
+  })
+
+  test('the plan the welcome logo names says where its spend is shown, or that it has no plan limit', async () => {
+    const plan = (line: string): string => find(buildLines(account({ noLimitReported: true, plan: line })).map(text), /^Plan Limits/)
+    expect(plan('Claude Enterprise')).toMatch(/^Plan Limits  Enterprise +see \/usage *$/)
+    expect(plan('Claude Team')).toMatch(/^Plan Limits  Team +see \/usage *$/)
+    expect(plan('API Usage Billing')).toMatch(/^Plan Limits  API key +no plan limit *$/)
+    expect(plan('Amazon Bedrock')).toMatch(/^Plan Limits  Amazon Bedrock +no plan limit *$/)
+    expect(plan('Cloud gateway')).toMatch(/^Plan Limits  Cloud gateway +not reported *$/)
+    // A login whose plan the logo doesn't know says no more than no line at all.
+    expect(plan('Claude API')).toMatch(/^Plan Limits  not reported *$/)
+    // The note sits where a bar would be.
+    const lines = buildLines(account({ noLimitReported: true, plan: 'Claude Enterprise' })).map(text)
+    expect(find(lines, /^Plan Limits/).indexOf('see /usage')).toBe(find(lines, /^Agents/).search(/▆/))
+  })
+
+  test('a long provider name is cut so the grid keeps its columns', async () => {
+    const named = buildLines(account({ noLimitReported: true, plan: 'Claude Platform on Google Cloud' })).map(text)
+    const plain = buildLines(account({ noLimitReported: true })).map(text)
+    expect(find(named, /^Plan Limits/)).toMatch(/^Plan Limits  Platform on Goog… +no plan limit *$/)
+    expect(find(named, /^Agents/)).toBe(find(plain, /^Agents/))
+  })
+
+  test('with windows reported, the plan named changes nothing', async () => {
+    expect(buildLines(base({ plan: 'Claude Max' })).map(text)).toEqual(buildLines(base()).map(text))
   })
 
   test('before a reply, with nothing reported, there is no plan line', async () => {
     expect(buildLines(account()).map(text).join('\n')).not.toMatch(/Plan Limits|not reported/)
+    expect(buildLines(account({ plan: 'Claude Enterprise' })).map(text).join('\n')).not.toMatch(/Plan Limits|Enterprise/)
   })
 
-  test('collapsed, the month says not reported after the session', async () => {
-    expect(text(buildLines(account({ noLimitReported: true, isCollapsed: true }))[0])).toMatch(/^Session 290k tok \$18\.40 +Plan Limits month not reported +Agents/)
+  test('collapsed, the plan line follows the session', async () => {
+    expect(text(buildLines(account({ noLimitReported: true, isCollapsed: true }))[0])).toMatch(/^Session 290k tok \$18\.40 +Plan Limits not reported +Agents/)
+    expect(text(buildLines(account({ noLimitReported: true, plan: 'Claude Enterprise', isCollapsed: true }))[0])).toMatch(
+      /^Session 290k tok \$18\.40 +Plan Limits Enterprise see \/usage +Agents/,
+    )
   })
 
-  test('narrow, not reported moves to the detail column and every line fits', async () => {
-    expect(find(buildLines(account({ noLimitReported: true, width: 60 })).map(text), /^Plan Limits/)).toMatch(/^Plan Limits +month +not reported$/)
-    for (const width of [40, 60, 72, 100, 160]) for (const line of buildLines(account({ noLimitReported: true, width }))) expect(text(line).length).toBeLessThanOrEqual(width)
+  test('narrow, the note moves to the detail column and every line fits', async () => {
+    expect(find(buildLines(account({ noLimitReported: true, plan: 'Claude Enterprise', width: 60 })).map(text), /^Plan Limits/)).toMatch(/^Plan Limits  Enterprise +see \/usage$/)
+    for (const plan of [undefined, 'Claude Enterprise', 'Claude Platform on Google Cloud'])
+      for (const width of [40, 60, 72, 100, 160])
+        for (const line of buildLines(account({ noLimitReported: true, plan, width }))) expect(text(line).length).toBeLessThanOrEqual(width)
+  })
+})
+
+describe('shells', () => {
+  const shell = (id: string, name: string, command: string, minutes: number) => ({ id, name, command, startedAt: NOW - minutes * 60_000 })
+  const team = (patch: Partial<View> = {}): View =>
+    base({
+      roster: [
+        { id: 'e', type: 'Explore', description: 'look around', status: 'running' },
+        { id: 't', type: 'general-purpose', name: 'test-writer', description: 'write tests', status: 'running' },
+      ],
+      loops: { e: { model: 'claude-haiku-5-5', tokens: 30_000, sent: 30_000, received: 2_000, activity: 'Grep "x"' } },
+      shells: {
+        main: [shell('1', 'Start dev server', 'npm run dev', 74)],
+        t: [shell('2', 'Watch tests', 'npm test -- --watch', 12), shell('3', '', 'tail -f a.log', 3)],
+      },
+      ...patch,
+    })
+
+  test("each shell sits under the agent that started it, before that agent's own agents, with how long it has run", async () => {
+    const lines = buildLines(team()).map(text)
+    const tree = lines.slice(lines.findIndex(line => line.startsWith('Agents')))
+    expect(tree).toHaveLength(6)
+    expect(tree[1]).toMatch(/^ +├─\$ Start dev serv… shell +1h14m +npm run dev$/)
+    expect(tree[2]).toMatch(/^ +├─● Explore /)
+    expect(tree[3]).toMatch(/^ +└─● test-writer /)
+    expect(tree[4]).toMatch(/^ +├─\$ Watch tests +shell +12m +npm test -- --watch$/)
+    // With no words of its own, a shell goes by its command, said once.
+    expect(tree[5]).toMatch(/^ +└─\$ tail -f a\.log +shell +3m *$/)
+  })
+
+  test("a shell's columns line up with the agents': model, value, then its command with their activity", async () => {
+    const tree = buildLines(team()).map(text).filter(line => /[├└]─/.test(line))
+    const agent = tree.find(line => line.includes('Explore'))!
+    const shellRow = tree.find(line => line.includes('Start dev'))!
+    expect(shellRow.indexOf('shell')).toBe(agent.indexOf('Haiku'))
+    expect(shellRow.indexOf('1h14m')).toBe(agent.indexOf('15%'))
+    expect(shellRow.indexOf('npm run dev')).toBe(agent.indexOf('Grep'))
+    // A shell has no bar: there is nothing for it to fill.
+    expect(shellRow).not.toMatch(/▆|·/)
+  })
+
+  test('a shell is dim, and its sign is plain ASCII', async () => {
+    const row = buildLines(team()).find(line => text(line).includes('npm run dev'))!
+    expect(row.filter(s => s.text.trim() && !s.dim).map(s => s.text.trim())).toEqual(['Start dev serv…'])
+    expect(row.some(s => s.text === '$ ')).toBe(true)
+  })
+
+  test('when the tree runs out of room, shells give way first and the last row counts them', async () => {
+    // Seven rows: session and plan take three, so the tree has four.
+    const tree = (maxRows: number) => buildLines(team({ maxRows })).map(text).slice(3)
+    expect(tree(7)).toEqual([expect.stringMatching(/^Agents +● main/), expect.stringMatching(/Explore/), expect.stringMatching(/test-writer/), expect.stringMatching(/^ +\+3 more shells/)])
+    expect(tree(8)).toEqual([
+      expect.stringMatching(/^Agents +● main/),
+      expect.stringMatching(/Start dev/),
+      expect.stringMatching(/Explore/),
+      expect.stringMatching(/test-writer/),
+      expect.stringMatching(/^ +\+2 more shells/),
+    ])
+    expect(tree(5)).toEqual([expect.stringMatching(/^Agents +● main/), expect.stringMatching(/^ +\+2 more agents, 3 shells +$/)])
+    // All of it fits: nothing is counted.
+    expect(tree(20).join('\n')).not.toMatch(/more/)
+  })
+
+  test('collapsed, the shells are counted beside the agents', async () => {
+    expect(text(buildLines(team({ isCollapsed: true }))[0])).toMatch(/Agents 3 ●  3 \$  main 41%/)
+  })
+
+  test('/canopy set shells off hides them, and the tree is as before', async () => {
+    const off = buildLines(team({ settings: settingsFrom({ shells: false }) })).map(text)
+    expect(off.join('\n')).not.toMatch(/shell|\$ /)
+    expect(off).toEqual(buildLines(team({ shells: {} })).map(text))
+    expect(text(buildLines(team({ isCollapsed: true, settings: settingsFrom({ shells: false }) }))[0])).toMatch(/Agents 3 ●  main/)
+  })
+
+  test('narrow, a shell keeps its name, time and command, and every line fits', async () => {
+    const tree = buildLines(team({ width: 60 })).map(text)
+    expect(tree.find(line => line.includes('Watch'))).toMatch(/^ +├─\$ Watch te… shell +12m +npm test/)
+    for (const width of [40, 60, 72, 100, 120, 160]) for (const line of buildLines(team({ width }))) expect(text(line).length).toBeLessThanOrEqual(width)
   })
 })
 

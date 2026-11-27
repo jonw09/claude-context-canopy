@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { AgentRow } from '../types'
-import { atLeast, clip, describeTool, money, tokens, until, windowLabel } from '../hooks/format'
+import { billingFrom } from '../hooks/billing'
+import { atLeast, clip, describeTool, duration, money, tokens, until, windowLabel } from '../hooks/format'
 import { keepSessions, merge, splitFor, weigh } from '../hooks/estimate'
 import { familyOf, healthOf, modelLabel } from '../hooks/palette'
 import { overrideFrom, overridesFrom, settingsFrom } from '../hooks/settings'
+import { EMPTY_WATCH, type ShellRow, endShells, finishedIn, isWatching, readShells } from '../hooks/shells'
 import { buildTree, flatten } from '../hooks/tree'
 
 const agent = (id: string, parentId?: string, status = 'running'): AgentRow => ({
@@ -166,6 +168,7 @@ describe('settings', () => {
       showPlan: true,
       showSession: true,
       showAgents: true,
+      showShells: true,
       estimate: true,
     })
   })
@@ -176,12 +179,13 @@ describe('settings', () => {
   })
 
   test('switches are read as given', async () => {
-    expect(settingsFrom({ plan: false, split: false })).toMatchObject({ showPlan: false, estimate: false })
+    expect(settingsFrom({ plan: false, split: false, shells: false })).toMatchObject({ showPlan: false, estimate: false, showShells: false })
   })
 
   test('/canopy set reads percentages and switches, and nothing else', async () => {
     expect(overrideFrom('amber', '70')).toEqual({ amber: 70 })
     expect(overrideFrom('split', 'off')).toEqual({ split: false })
+    expect(overrideFrom('shells', 'off')).toEqual({ shells: false })
     // The spend switch went with the spend request.
     expect(overrideFrom('spend', 'off')).toBeUndefined()
     expect(overrideFrom('amber', 'lots')).toBeUndefined()
@@ -189,12 +193,13 @@ describe('settings', () => {
   })
 
   test('saved settings keep what this version has, and drop the rest', async () => {
-    expect(overridesFrom({ amber: 70, red: 95, plan: false, session: true, agents: false, split: false })).toEqual({
+    expect(overridesFrom({ amber: 70, red: 95, plan: false, session: true, agents: false, shells: false, split: false })).toEqual({
       amber: 70,
       red: 95,
       plan: false,
       session: true,
       agents: false,
+      shells: false,
       split: false,
     })
     // An earlier version saved `spend`; a value of the wrong kind is dropped too.
@@ -202,5 +207,89 @@ describe('settings', () => {
     expect(overridesFrom(undefined)).toEqual({})
     expect(overridesFrom(null)).toEqual({})
     expect(overridesFrom('settings')).toEqual({})
+  })
+})
+
+describe('billing', () => {
+  test("the welcome logo's plan line, read for the plan row", async () => {
+    expect(billingFrom('Claude Enterprise')).toEqual({ name: 'Enterprise', note: 'see /usage' })
+    expect(billingFrom('Claude Max')).toEqual({ name: 'Max', note: 'see /usage' })
+    // An organisation may name its plan itself.
+    expect(billingFrom('Claude Acme Engineering')).toEqual({ name: 'Acme Engineering', note: 'see /usage' })
+    expect(billingFrom('API Usage Billing')).toEqual({ name: 'API key', note: 'no plan limit' })
+    expect(billingFrom('Google Vertex AI')).toEqual({ name: 'Google Vertex AI', note: 'no plan limit' })
+    expect(billingFrom('Claude Platform on AWS')).toEqual({ name: 'Platform on AWS', note: 'no plan limit' })
+    expect(billingFrom('Amazon Bedrock (Mantle)')).toEqual({ name: 'Amazon Bedrock (…', note: 'no plan limit' })
+    expect(billingFrom('Cloud gateway')).toEqual({ name: 'Cloud gateway', note: 'not reported' })
+  })
+
+  test('no line, an empty one, or a plan the logo does not know gives nothing to go by', async () => {
+    for (const line of [undefined, null, '', '   ', 'Claude API']) expect(billingFrom(line)).toBeUndefined()
+  })
+})
+
+describe('shells', () => {
+  const NOW = Date.parse('2026-10-21T10:00:00Z')
+  const call = (id: string, input: Record<string, unknown>, result?: string): ShellRow => ({
+    role: 'assistant',
+    text: '',
+    toolUses: [{ tool_use_id: id, tool: 'Bash', input, ...(result === undefined ? {} : { text: result }) }],
+  })
+  const answer = (id: string, text: string, isError = false): ShellRow => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text, isError }] })
+  const notice = (body: string): ShellRow => ({ role: 'user', text: `<system-reminder>\n<task-notification>\n${body}\n</task-notification>\n</system-reminder>`, toolUses: [] })
+  const STARTED = 'Command running in background with ID: b7k2. Output is being written to: /tmp/b7k2.output.'
+
+  test('a call whose answer says it runs in the background becomes a shell, with its words, command and task id', async () => {
+    const asked = readShells(EMPTY_WATCH, [call('u1', { command: 'npm  run dev', description: 'Start dev server', run_in_background: true })], NOW)
+    expect(asked.open).toEqual([])
+    expect(isWatching(asked)).toBe(true)
+    const running = readShells(asked, [answer('u1', STARTED)], NOW + 1000)
+    expect(running.open).toEqual([{ id: 'u1', name: 'Start dev server', command: 'npm run dev', taskId: 'b7k2', startedAt: NOW + 1000 }])
+    expect(running.calls).toEqual([])
+  })
+
+  test('the answer may already be on the call, and a command moved to the background counts too', async () => {
+    const moved = 'Command did not complete within its 120s timeout and was moved to the background (ID: c9). Output is being written to: /tmp/c9.'
+    expect(readShells(EMPTY_WATCH, [call('u2', { command: 'make' }, moved)], NOW).open).toEqual([{ id: 'u2', name: '', command: 'make', taskId: 'c9', startedAt: NOW }])
+  })
+
+  test('a command that ran to its end, or failed, is forgotten', async () => {
+    const watch = readShells(EMPTY_WATCH, [call('u3', { command: 'npm test' }), answer('u3', 'All 12 tests passed')], NOW)
+    expect(watch).toEqual(EMPTY_WATCH)
+    expect(isWatching(watch)).toBe(false)
+    expect(readShells(EMPTY_WATCH, [call('u4', { command: 'npm run dev', run_in_background: true }), answer('u4', STARTED, true)], NOW).open).toEqual([])
+  })
+
+  test('a task notice ends the shell it names, by tool use or task id, and a later read never brings it back', async () => {
+    const running = readShells(EMPTY_WATCH, [call('u1', { command: 'npm run dev' }), answer('u1', STARTED), call('u5', { command: 'sleep 99' }), answer('u5', 'Command running in background with ID: z1.')], NOW)
+    expect(running.open.map(s => s.id)).toEqual(['u1', 'u5'])
+    const one = readShells(running, [notice('<task-id>b7k2</task-id>\n<status>completed</status>')], NOW)
+    expect(one.open.map(s => s.id)).toEqual(['u5'])
+    const both = readShells(one, [notice('<task-id>other</task-id>\n<tool-use-id>u5</tool-use-id>\n<status>killed</status>')], NOW)
+    expect(both.open).toEqual([])
+    expect(both.ended).toEqual(['u1', 'u5'])
+    // Read again from the newest rows, the start is seen once more and stays ended.
+    expect(readShells(both, [call('u1', { command: 'npm run dev' }, STARTED)], NOW).open).toEqual([])
+  })
+
+  test("tags outside a notice, a person's prompt for one, end nothing", async () => {
+    expect(finishedIn('look at <task-id>b7k2</task-id>')).toEqual(new Set())
+    expect(finishedIn('<task-notification><task-id> b7k2 </task-id><tool-use-id>u1</tool-use-id></task-notification>')).toEqual(new Set(['b7k2', 'u1']))
+    const running = readShells(EMPTY_WATCH, [call('u1', { command: 'npm run dev' }, STARTED)], NOW)
+    expect(endShells(running, new Set(['nope']))).toBe(running)
+  })
+
+  test('other tools and the rows around them are passed over', async () => {
+    const rows: ShellRow[] = [
+      { role: 'user', text: 'run the dev server please', toolUses: [] },
+      { role: 'assistant', text: 'Sure', toolUses: [{ tool_use_id: 'r1', tool: 'Read', input: { file_path: 'a.ts' }, text: STARTED }] },
+    ]
+    expect(readShells(EMPTY_WATCH, rows, NOW)).toEqual(EMPTY_WATCH)
+  })
+
+  test('how long a shell has run', async () => {
+    expect(duration(0)).toBe('0m')
+    expect(duration(74 * 60_000)).toBe('1h14m')
+    expect(duration(50 * 3_600_000)).toBe('2d02h')
   })
 })
